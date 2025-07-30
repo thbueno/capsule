@@ -1,0 +1,484 @@
+{
+  "designSystem": {
+    "name": "Capsules",
+    "version": "1.0.0",
+    "description": "Design system for Capsules social app with friend selection and chat functionality",
+    
+    "colors": {
+      "light": {
+        "title": "#0F0F0F",
+        "background": "#f8f5f0",
+        "backgroundSecondary": "#ffffff",
+        "primary": "#44ff00",
+        "secondary": "#FF1200",
+        "text": "#5b645b",
+        "textSecondary": "#8a8a8a",
+        "border": "#e5e5e5",
+        "overlay": "rgba(0, 0, 0, 0.7)",
+        "overlayLight": "rgba(0, 0, 0, 0.1)",
+        "success": "#44ff00",
+        "warning": "#FF8C00",
+        "error": "#FF1200",
+        "cardBackground": "#3a3a3a",
+        "cardText": "#ffffff",
+        "activeGreen": "#44ff00",
+        "inactiveGray": "#8a8a8a"
+      },
+      "dark": {
+        "title": "#ffffff",
+        "background": "#1a1a1a",
+        "backgroundSecondary": "#2a2a2a",
+        "primary": "#44ff00",
+        "secondary": "#FF1200",
+        "text": "#e0e0e0",
+        "textSecondary": "#a0a0a0",
+        "border": "#404040",
+        "overlay": "rgba(255, 255, 255, 0.1)",
+        "overlayLight": "rgba(255, 255, 255, 0.05)",
+        "success": "#44ff00",
+        "warning": "#FF8C00",
+        "error": "#FF1200",
+        "cardBackground": "#2a2a2a",
+        "cardText": "#ffffff",
+        "activeGreen": "#44ff00",
+        "inactiveGray": "#6a6a6a"
+      }
+    },
+
+    "typography": {
+      "fontFamily": {
+        "primary": "System",
+        "secondary": "SF Pro Display",
+        "mono": "SF Mono"
+      },
+      "sizes": {
+        "h1": 28,
+        "h2": 24,
+        "h3": 20,
+        "body": 16,
+        "bodySmall": 14,
+        "caption": 12,
+        "appTitle": 22
+      },
+      "weights": {
+        "light": "300",
+        "regular": "400",
+        "medium": "500",
+        "semibold": "600",
+        "bold": "700"
+      },
+      "lineHeights": {
+        "tight": 1.2,
+        "normal": 1.4,
+        "relaxed": 1.6
+      }
+    },
+
+    "spacing": {
+      "xs": 4,
+      "sm": 8,
+      "md": 16,
+      "lg": 24,
+      "xl": 32,
+      "xxl": 48,
+      "xxxl": 64,
+      "component": 16,
+      "section": 24,
+      "page": 20,
+      "statusBar": 44,
+      "safeArea": 34
+    },
+
+    "borderRadius": {
+      "none": 0,
+      "sm": 8,
+      "md": 12,
+      "lg": 16,
+      "xl": 20,
+      "xxl": 24,
+      "full": 9999,
+      "avatar": 9999,
+      "card": 16,
+      "button": 12,
+      "moment": 20
+    },
+
+    "shadows": {
+      "none": "none",
+      "sm": {
+        "shadowColor": "#000",
+        "shadowOffset": { "width": 0, "height": 1 },
+        "shadowOpacity": 0.05,
+        "shadowRadius": 2,
+        "elevation": 1
+      },
+      "md": {
+        "shadowColor": "#000",
+        "shadowOffset": { "width": 0, "height": 2 },
+        "shadowOpacity": 0.1,
+        "shadowRadius": 4,
+        "elevation": 3
+      },
+      "lg": {
+        "shadowColor": "#000",
+        "shadowOffset": { "width": 0, "height": 4 },
+        "shadowOpacity": 0.15,
+        "shadowRadius": 8,
+        "elevation": 5
+      }
+    },
+
+    "components": {
+      "header": {
+        "height": 60,
+        "paddingHorizontal": 20,
+        "backgroundColor": "background",
+        "borderBottomWidth": 0,
+        "alignItems": "center",
+        "justifyContent": "space-between",
+        "flexDirection": "row",
+        "marginTop": "statusBar",
+        "elements": {
+          "backButton": {
+            "size": 24,
+            "color": "title",
+            "marginRight": 16
+          },
+          "title": {
+            "fontSize": "appTitle",
+            "fontWeight": "semibold",
+            "color": "title",
+            "textAlign": "center",
+            "flex": 1
+          },
+          "profileAvatar": {
+            "size": 36,
+            "borderRadius": "full",
+            "borderWidth": 2,
+            "borderColor": "primary"
+          }
+        }
+      },
+
+      "friendsCarousel": {
+        "height": 90,
+        "paddingHorizontal": 20,
+        "paddingVertical": 12,
+        "marginBottom": 16,
+        "scrollDirection": "horizontal",
+        "showsHorizontalScrollIndicator": false,
+        "elements": {
+          "friendItem": {
+            "width": 70,
+            "alignItems": "center",
+            "marginRight": 16,
+            "avatar": {
+              "size": 60,
+              "borderRadius": "full",
+              "borderWidth": 2,
+              "activeBorderColor": "activeGreen",
+              "inactiveBorderColor": "transparent"
+            },
+            "activeIndicator": {
+              "size": 12,
+              "backgroundColor": "activeGreen",
+              "borderRadius": "full",
+              "position": "absolute",
+              "bottom": 4,
+              "right": 4,
+              "borderWidth": 2,
+              "borderColor": "background"
+            },
+            "grayscaleFilter": {
+              "opacity": 0.6,
+              "filter": "grayscale(100%)"
+            }
+          }
+        }
+      },
+
+      "starterCard": {
+        "backgroundColor": "cardBackground",
+        "borderRadius": "card",
+        "paddingHorizontal": 20,
+        "paddingVertical": 24,
+        "marginHorizontal": 20,
+        "marginBottom": 16,
+        "minHeight": 100,
+        "justifyContent": "center",
+        "shadow": "md",
+        "elements": {
+          "quoteIcon": {
+            "size": 24,
+            "color": "cardText",
+            "marginBottom": 12
+          },
+          "text": {
+            "fontSize": "body",
+            "fontWeight": "medium",
+            "color": "cardText",
+            "lineHeight": "relaxed",
+            "textAlign": "left"
+          },
+          "responseButton": {
+            "position": "absolute",
+            "bottom": 16,
+            "right": 16,
+            "size": 32,
+            "backgroundColor": "overlayLight",
+            "borderRadius": "full",
+            "alignItems": "center",
+            "justifyContent": "center"
+          }
+        }
+      },
+
+      "momentCard": {
+        "borderRadius": "moment",
+        "marginHorizontal": 20,
+        "marginBottom": 20,
+        "overflow": "hidden",
+        "aspectRatio": 0.8,
+        "backgroundColor": "backgroundSecondary",
+        "shadow": "lg",
+        "elements": {
+          "image": {
+            "width": "100%",
+            "height": "100%",
+            "resizeMode": "cover"
+          },
+          "addButton": {
+            "position": "absolute",
+            "bottom": 16,
+            "right": 16,
+            "size": 48,
+            "backgroundColor": "background",
+            "borderRadius": "full",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "shadow": "md",
+            "icon": {
+              "size": 24,
+              "color": "title"
+            }
+          },
+          "overlay": {
+            "position": "absolute",
+            "bottom": 0,
+            "left": 0,
+            "right": 0,
+            "height": 120,
+            "background": "linear-gradient(transparent, rgba(0,0,0,0.6))"
+          }
+        }
+      },
+
+      "chatInterface": {
+        "compactHeader": {
+          "height": 80,
+          "paddingHorizontal": 20,
+          "paddingTop": 8,
+          "backgroundColor": "background",
+          "elements": {
+            "filterTabs": {
+              "flexDirection": "row",
+              "paddingVertical": 8,
+              "gap": 8,
+              "tab": {
+                "paddingHorizontal": 16,
+                "paddingVertical": 8,
+                "borderRadius": "button",
+                "backgroundColor": "overlayLight",
+                "activeBackgroundColor": "primary",
+                "text": {
+                  "fontSize": "bodySmall",
+                  "fontWeight": "medium",
+                  "color": "text",
+                  "activeColor": "title"
+                }
+              }
+            },
+            "friendAvatars": {
+              "flexDirection": "row",
+              "alignItems": "center",
+              "marginTop": 8,
+              "avatar": {
+                "size": 32,
+                "borderRadius": "full",
+                "marginRight": -8,
+                "borderWidth": 2,
+                "borderColor": "background"
+              }
+            }
+          }
+        },
+        "messageInput": {
+          "position": "absolute",
+          "bottom": 0,
+          "left": 0,
+          "right": 0,
+          "paddingHorizontal": 16,
+          "paddingVertical": 12,
+          "paddingBottom": "safeArea",
+          "backgroundColor": "background",
+          "borderTopWidth": 1,
+          "borderTopColor": "border",
+          "elements": {
+            "input": {
+              "flex": 1,
+              "backgroundColor": "backgroundSecondary",
+              "borderRadius": "button",
+              "paddingHorizontal": 16,
+              "paddingVertical": 12,
+              "fontSize": "body",
+              "color": "text",
+              "marginRight": 8
+            },
+            "actionButtons": {
+              "flexDirection": "row",
+              "gap": 8,
+              "button": {
+                "size": 40,
+                "backgroundColor": "backgroundSecondary",
+                "borderRadius": "full",
+                "alignItems": "center",
+                "justifyContent": "center"
+              }
+            }
+          }
+        }
+      },
+
+      "animations": {
+        "headerTransition": {
+          "duration": 300,
+          "easing": "ease-in-out",
+          "properties": ["height", "opacity", "transform"]
+        },
+        "friendSelection": {
+          "duration": 200,
+          "easing": "ease-out",
+          "properties": ["opacity", "transform", "borderColor"]
+        },
+        "cardHover": {
+          "duration": 150,
+          "easing": "ease-in-out",
+          "properties": ["transform", "shadow"]
+        }
+      }
+    },
+
+    "layout": {
+      "screen": {
+        "flex": 1,
+        "backgroundColor": "background"
+      },
+      "container": {
+        "flex": 1,
+        "paddingTop": "statusBar"
+      },
+      "scrollView": {
+        "flex": 1,
+        "showsVerticalScrollIndicator": false
+      },
+      "section": {
+        "marginBottom": "section"
+      },
+      "gap": {
+        "xs": "xs",
+        "sm": "sm", 
+        "md": "md",
+        "lg": "lg",
+        "component": "component",
+        "section": "section"
+      }
+    },
+
+    "interactions": {
+      "friendSelection": {
+        "activeState": {
+          "avatar": {
+            "borderColor": "activeGreen",
+            "borderWidth": 2,
+            "opacity": 1,
+            "transform": "scale(1.05)"
+          },
+          "indicator": {
+            "visible": true,
+            "backgroundColor": "activeGreen"
+          }
+        },
+        "inactiveState": {
+          "avatar": {
+            "borderColor": "transparent",
+            "borderWidth": 0,
+            "opacity": 0.6,
+            "filter": "grayscale(100%)"
+          },
+          "indicator": {
+            "visible": false
+          }
+        }
+      },
+      "scrollBehavior": {
+        "headerCollapse": {
+          "threshold": 100,
+          "animation": "headerTransition"
+        },
+        "friendCarouselCompact": {
+          "threshold": 150,
+          "compactHeight": 50,
+          "avatarSize": 32
+        }
+      }
+    },
+
+    "breakpoints": {
+      "mobile": {
+        "minWidth": 320,
+        "maxWidth": 480
+      },
+      "tablet": {
+        "minWidth": 481,
+        "maxWidth": 768
+      }
+    },
+
+    "accessibility": {
+      "minimumTouchTarget": 44,
+      "focusRing": {
+        "color": "primary",
+        "width": 2,
+        "offset": 2
+      },
+      "contrast": {
+        "minimum": 4.5,
+        "enhanced": 7
+      }
+    },
+
+    "implementation": {
+      "cssVariables": {
+        "colors": "Use CSS custom properties for theme switching",
+        "spacing": "Use consistent spacing scale",
+        "typography": "Use system font stack with fallbacks"
+      },
+      "nativewind": {
+        "config": "Configure Tailwind to use CSS variables",
+        "utilities": "Create custom utilities for app-specific patterns"
+      },
+      "components": {
+        "structure": "Create reusable components following this system",
+        "props": "Use typed props for theme customization",
+        "variants": "Support light/dark mode variants"
+      }
+    },
+
+    "usage": {
+      "themeToggle": "Implement theme switching using CSS variable updates",
+      "componentConsistency": "All components should reference design tokens",
+      "responsiveness": "Use flexible layouts that adapt to different screen sizes",
+      "performance": "Optimize animations and interactions for 60fps"
+    }
+  }
+}
