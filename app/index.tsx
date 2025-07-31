@@ -77,6 +77,9 @@ function MainScreenContent() {
   >("all");
   const [isChatMode, setIsChatMode] = React.useState(false);
 
+  // Calculate header height to add proper padding
+  const headerHeight = insets.top + 72; // Same calculation as in Header component
+
   // Animation values
   const scrollY = React.useRef(new Animated.Value(0)).current;
   const SCROLL_THRESHOLD = 150;
@@ -232,6 +235,7 @@ function MainScreenContent() {
         )}
         scrollEventThrottle={16}
         contentContainerStyle={{
+          paddingTop: headerHeight, // Add padding to account for header height
           paddingBottom: contentPaddingBottom,
         }}
       >
