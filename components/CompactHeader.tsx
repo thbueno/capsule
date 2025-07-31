@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeProvider';
 import { Friend } from '../types';
 
@@ -19,6 +20,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
   onFilterChange,
 }) => {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const filters = [
     { key: 'all' as const, label: 'all' },
@@ -27,7 +29,14 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[
+      styles.container, 
+      { 
+        backgroundColor: colors.background,
+        paddingTop: insets.top + 8,
+        height: insets.top + 80,
+      }
+    ]}>
       {/* Filter Tabs */}
       <View style={styles.filtersContainer}>
         {filters.map((filter) => (
@@ -98,10 +107,9 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: 80,
     paddingHorizontal: 20,
-    paddingTop: 8,
-    justifyContent: 'center',
+    paddingBottom: 8,
+    justifyContent: 'flex-end',
   },
   filtersContainer: {
     flexDirection: 'row',

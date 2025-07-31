@@ -1,7 +1,15 @@
 import { ChatInterface } from "@/components/ChatInterface";
 import { CompactHeader } from "@/components/CompactHeader";
 import React from "react";
-import { Animated, NativeScrollEvent, NativeSyntheticEvent, SafeAreaView, StyleSheet } from "react-native";
+import {
+  Animated,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  StatusBar,
+  StyleSheet,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FriendsCarousel } from "../components/FriendsCarousel";
 import { Header } from "../components/Header";
 import { MomentCard } from "../components/MomentCard";
@@ -62,6 +70,7 @@ const sampleMoments = [
 
 function MainScreenContent() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [selectedFriendId, setSelectedFriendId] = React.useState<string>("1");
   const [activeFilter, setActiveFilter] = React.useState<
     "all" | "starters" | "moments"
@@ -169,9 +178,12 @@ function MainScreenContent() {
   const selectedFriend = sampleFriends.find((f) => f.id === selectedFriendId);
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={colors.background}
+        translucent={true}
+      />
       {/* Original Header */}
       <Animated.View
         style={[styles.headerContainer, { opacity: headerOpacity }]}
@@ -261,7 +273,7 @@ function MainScreenContent() {
           onGalleryPress={handleGalleryPress}
         />
       </Animated.View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -289,7 +301,7 @@ const styles = StyleSheet.create({
   },
   compactHeaderContainer: {
     position: "absolute",
-    top: 44, // Status bar height
+    top: 0, // Will be positioned using safe area insets in the component
     left: 0,
     right: 0,
     zIndex: 11,

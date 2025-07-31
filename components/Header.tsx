@@ -1,13 +1,22 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeProvider';
 import { HeaderProps } from '../types';
 
 export const Header: React.FC<HeaderProps> = ({ title, onProfilePress }) => {
-  const { colors, theme } = useTheme();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[
+      styles.container, 
+      { 
+        backgroundColor: colors.background,
+        paddingTop: insets.top + 12, // Safe area + additional padding
+        height: insets.top + 72, // Safe area + content height
+      }
+    ]}>
       <Text style={[styles.title, { color: colors.title }]}>
         {title}
       </Text>
@@ -26,11 +35,10 @@ export const Header: React.FC<HeaderProps> = ({ title, onProfilePress }) => {
 
 const styles = StyleSheet.create({
   container: {
-    height: 60,
     paddingHorizontal: 20,
-    paddingTop: 44, // Status bar offset
+    paddingBottom: 12,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end', // Align to bottom of container
     justifyContent: 'space-between',
   },
   title: {
