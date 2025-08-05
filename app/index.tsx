@@ -1,6 +1,4 @@
-import { ChatInterface } from "@/components/ChatInterface";
-import { CompactHeader } from "@/components/CompactHeader";
-import React from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Animated,
   NativeScrollEvent,
@@ -10,46 +8,19 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { FriendsCarousel } from "../components/FriendsCarousel";
-import { Header } from "../components/Header";
-import { MomentCard } from "../components/MomentCard";
-import { StarterCard } from "../components/StarterCard";
-import { ThemeProvider, useTheme } from "../context/ThemeProvider";
+import { router } from "expo-router";
 
-// Sample data - will be moved to proper data management later
-const sampleFriends = [
-  {
-    id: "1",
-    name: "Alice",
-    avatar: "https://picsum.photos/120/120?random=1",
-    isOnline: true,
-  },
-  {
-    id: "2",
-    name: "Bob",
-    avatar: "https://picsum.photos/120/120?random=2",
-    isOnline: false,
-  },
-  {
-    id: "3",
-    name: "Charlie",
-    avatar: "https://picsum.photos/120/120?random=3",
-    isOnline: true,
-  },
-  {
-    id: "4",
-    name: "Diana",
-    avatar: "https://picsum.photos/120/120?random=4",
-    isOnline: false,
-  },
-  {
-    id: "5",
-    name: "Eve",
-    avatar: "https://picsum.photos/120/120?random=5",
-    isOnline: true,
-  },
-];
+import { ChatInterface } from "@/components/ChatInterface";
+import { CompactHeader } from "@/components/CompactHeader";
+import { FriendsCarousel } from "@/components/FriendsCarousel";
+import { Header } from "@/components/Header";
+import { MomentCard } from "@/components/MomentCard";
+import { StarterCard } from "@/components/StarterCard";
+import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
+import { supabase } from "@/lib/supabase";
+import { Friend } from "@/types";
 
+// Replace these later with Supabase-connected data
 const sampleStarters = [
   {
     id: "1",
@@ -71,20 +42,69 @@ const sampleMoments = [
 function MainScreenContent() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const [selectedFriendId, setSelectedFriendId] = React.useState<string>("1");
-  const [activeFilter, setActiveFilter] = React.useState<
-    "all" | "starters" | "moments"
-  >("all");
-  const [isChatMode, setIsChatMode] = React.useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"all" | "starters" | "moments">("all");
+  const [isChatMode, setIsChatMode] = useState(false);
 
-  // Calculate header height to add proper padding
-  const headerHeight = insets.top + 72; // Same calculation as in Header component
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const SCROLL_THRESHOLD = 150;
+  const headerHeight = insets.top + 72;
+
+  useEffect(() => {
+    const fetchFriends = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id ?? null;
+      setUserId(uid);
+
+      if (!uid) return;
+
+      const { data, error } = await supabase
+        .from("friendships")
+        .select(`
+          id,
+          user_id,
+          friend_id,
+          user_profile: user_id (
+            id,
+            username
+          ),
+          friend_profile: friend_id (
+            id,
+            username
+          )
+        `)
+        .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
+        .eq("status", "accepted");
+
+      if (error) {
+        console.error("❌ Error fetching friends:", error);
+        return;
+      }
+
+      const friendsList: Friend[] = data.map((f: any) => {
+        const isSender = f.user_id === uid;
+        const profile = isSender ? f.friend_profile : f.user_profile;
+
+        return {
+          id: f.id,
+          name: profile?.username ?? "Unknown", // 🔄 Rename `username` → `name`
+          avatar: `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
+          isOnline: false, // 🔧 Dummy value unless you track online status
+        };
+      });
+
+      setFriends(friendsList);
+      if (friendsList.length > 0) {
+        setSelectedFriendId(friendsList[0].id);
+      }
+    };
+
+    fetchFriends();
+  }, []);
 
   // Animation values
-  const scrollY = React.useRef(new Animated.Value(0)).current;
-  const SCROLL_THRESHOLD = 150;
-
-  // Animated values for header transformation
   const headerOpacity = scrollY.interpolate({
     inputRange: [0, SCROLL_THRESHOLD],
     outputRange: [1, 0],
@@ -115,20 +135,10 @@ function MainScreenContent() {
     extrapolate: "clamp",
   });
 
-  const handleProfilePress = () => {
-    console.log("Profile pressed");
-  };
+  const selectedFriend = friends.find((f) => f.id === selectedFriendId);
 
   const handleFriendSelect = (friendId: string) => {
     setSelectedFriendId(friendId);
-  };
-
-  const handleStarterResponse = () => {
-    console.log("Starter response pressed");
-  };
-
-  const handleMomentAdd = () => {
-    console.log("Add moment pressed");
   };
 
   const handleFilterChange = (filter: "all" | "starters" | "moments") => {
@@ -139,15 +149,6 @@ function MainScreenContent() {
     console.log("Send message:", message);
   };
 
-  const handleCameraPress = () => {
-    console.log("Camera pressed");
-  };
-
-  const handleGalleryPress = () => {
-    console.log("Gallery pressed");
-  };
-
-  // Filter content based on active filter
   const getFilteredContent = () => {
     const content = [];
 
@@ -157,7 +158,7 @@ function MainScreenContent() {
           <StarterCard
             key={`starter-${starter.id}`}
             text={starter.text}
-            onResponse={handleStarterResponse}
+            onResponse={() => console.log("Starter response")}
           />
         ))
       );
@@ -169,7 +170,7 @@ function MainScreenContent() {
           <MomentCard
             key={`moment-${moment.id}`}
             imageUri={moment.imageUri}
-            onAddPress={handleMomentAdd}
+            onAddPress={() => console.log("Add moment")}
           />
         ))
       );
@@ -178,20 +179,13 @@ function MainScreenContent() {
     return content;
   };
 
-  const selectedFriend = sampleFriends.find((f) => f.id === selectedFriendId);
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor={colors.background}
-        translucent={true}
-      />
-      {/* Original Header */}
-      <Animated.View
-        style={[styles.headerContainer, { opacity: headerOpacity }]}
-      >
-        <Header title="Capsules" onProfilePress={handleProfilePress} />
+      <StatusBar barStyle="light-content" translucent backgroundColor={colors.background} />
+
+      {/* Full Header */}
+      <Animated.View style={[styles.headerContainer, { opacity: headerOpacity }]}>
+        <Header title="Capsules" onProfilePress={() => console.log("Profile pressed")} />
       </Animated.View>
 
       {/* Compact Header */}
@@ -212,14 +206,15 @@ function MainScreenContent() {
         ]}
       >
         <CompactHeader
-          friends={sampleFriends}
-          selectedFriendId={selectedFriendId}
+          friends={friends}
+          selectedFriendId={selectedFriendId || ""}
           onFriendSelect={handleFriendSelect}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
         />
       </Animated.View>
 
+      {/* Scrollable Content */}
       <Animated.ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -228,27 +223,24 @@ function MainScreenContent() {
           {
             useNativeDriver: false,
             listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-              const offsetY = event.nativeEvent.contentOffset.y;
-              setIsChatMode(offsetY >= SCROLL_THRESHOLD);
+              setIsChatMode(event.nativeEvent.contentOffset.y >= SCROLL_THRESHOLD);
             },
           }
         )}
         scrollEventThrottle={16}
         contentContainerStyle={{
-          paddingTop: headerHeight, // Add padding to account for header height
+          paddingTop: headerHeight,
           paddingBottom: contentPaddingBottom,
         }}
       >
-        {/* Friends Carousel */}
         <Animated.View style={{ opacity: friendsCarouselOpacity }}>
           <FriendsCarousel
-            friends={sampleFriends}
-            selectedFriendId={selectedFriendId}
+            friends={friends}
+            selectedFriendId={selectedFriendId || ""}
             onFriendSelect={handleFriendSelect}
           />
         </Animated.View>
 
-        {/* Filtered Content */}
         {getFilteredContent()}
       </Animated.ScrollView>
 
@@ -273,8 +265,8 @@ function MainScreenContent() {
         <ChatInterface
           selectedFriendName={selectedFriend?.name}
           onSendMessage={handleSendMessage}
-          onCameraPress={handleCameraPress}
-          onGalleryPress={handleGalleryPress}
+          onCameraPress={() => console.log("Camera pressed")}
+          onGalleryPress={() => console.log("Gallery pressed")}
         />
       </Animated.View>
     </View>
@@ -305,12 +297,16 @@ const styles = StyleSheet.create({
   },
   compactHeaderContainer: {
     position: "absolute",
-    top: 0, // Will be positioned using safe area insets in the component
+    top: 0,
     left: 0,
     right: 0,
     zIndex: 11,
   },
   chatContainer: {
     zIndex: 12,
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });
