@@ -8,8 +8,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
-
 import { ChatInterface } from "@/components/ChatInterface";
 import { CompactHeader } from "@/components/CompactHeader";
 import { FriendsCarousel } from "@/components/FriendsCarousel";
