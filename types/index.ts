@@ -23,8 +23,10 @@ export interface MomentCard {
 // Component prop interfaces
 export interface HeaderProps {
   title: string;
-  onProfilePress?: () => void;
+  onProfilePress: () => void;
+  avatarUrl?: string;
 }
+
 
 export interface FriendsCarouselProps {
   friends: Friend[];

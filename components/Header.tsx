@@ -1,10 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeProvider';
 import { HeaderProps } from '../types';
 
-export const Header: React.FC<HeaderProps> = ({ title, onProfilePress }) => {
+export const Header: React.FC<HeaderProps> = ({ title, onProfilePress, avatarUrl }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -22,13 +22,20 @@ export const Header: React.FC<HeaderProps> = ({ title, onProfilePress }) => {
       </Text>
       
       <TouchableOpacity 
-        style={[styles.profileButton, { borderColor: colors.primary }]}
-        onPress={onProfilePress}
-        activeOpacity={0.7}
-      >
-        {/* Placeholder for profile avatar - will be replaced with actual image */}
+      style={[styles.profileButton, { borderColor: colors.primary }]}
+      onPress={onProfilePress}
+      activeOpacity={0.7}
+    >
+      {avatarUrl ? (
+        <Image
+          source={{ uri: avatarUrl }}
+          style={styles.avatarImage}
+          resizeMode="cover"
+        />
+      ) : (
         <View style={[styles.avatarPlaceholder, { backgroundColor: colors.primary }]} />
-      </TouchableOpacity>
+      )}
+    </TouchableOpacity>
     </View>
   );
 };
@@ -55,6 +62,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  avatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   avatarPlaceholder: {
     width: 32,

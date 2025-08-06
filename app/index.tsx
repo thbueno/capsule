@@ -41,6 +41,7 @@ function MainScreenContent() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [userId, setUserId] = useState<string | null>(null);
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<"all" | "starters" | "moments">("all");
@@ -54,9 +55,21 @@ function MainScreenContent() {
     const fetchFriends = async () => {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
+      if (!uid) return;
       setUserId(uid);
 
-      if (!uid) return;
+      // Fetch current user's profile for avatar
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("avatar_url")
+        .eq("id", uid)
+        .single();
+
+      if (profileError) {
+        console.warn("Failed to fetch user profile:", profileError.message);
+      } else {
+        setUserAvatarUrl(profileData?.avatar_url ?? null);
+      }
 
       const { data, error } = await supabase
         .from("friendships")
@@ -66,11 +79,13 @@ function MainScreenContent() {
           friend_id,
           user_profile: user_id (
             id,
-            username
+            username,
+            avatar_url
           ),
           friend_profile: friend_id (
             id,
-            username
+            username,
+            avatar_url
           )
         `)
         .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
@@ -88,7 +103,7 @@ function MainScreenContent() {
         return {
           id: f.id,
           name: profile?.username ?? "Unknown", // 🔄 Rename `username` → `name`
-          avatar: `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
+          avatar: profile?.avatar_url ?? `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
           isOnline: false, // 🔧 Dummy value unless you track online status
         };
       });
@@ -183,7 +198,9 @@ function MainScreenContent() {
 
       {/* Full Header */}
       <Animated.View style={[styles.headerContainer, { opacity: headerOpacity }]}>
-        <Header title="Capsules" onProfilePress={() => console.log("Profile pressed")} />
+        <Header title="Capsules"
+         avatarUrl={userAvatarUrl ?? undefined}
+          onProfilePress={() => console.log("Profile pressed")} />
       </Animated.View>
 
       {/* Compact Header */}
