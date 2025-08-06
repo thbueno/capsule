@@ -1,7 +1,9 @@
 import React from 'react';
-import { Image, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, TouchableOpacity, View, Text} from 'react-native';
 import { useTheme } from '../context/ThemeProvider';
 import { FriendsCarouselProps } from '../types';
+import { router } from "expo-router";
+
 
 export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
   friends,
@@ -17,9 +19,18 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
     >
+      <TouchableOpacity
+        style={styles.friendItem}
+        onPress={() => router.push("/friend-requests")}
+        activeOpacity={0.8}
+      >
+        <View style={[styles.avatar, styles.manageButtonInner]}>
+          <Text style={styles.manageButtonText}>+</Text>
+        </View>
+      </TouchableOpacity>
+
       {friends.map((friend) => {
         const isSelected = friend.id === selectedFriendId;
-        
         return (
           <TouchableOpacity
             key={friend.id}
@@ -40,17 +51,13 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
                 {friend.avatar ? (
                   <Image
                     source={{ uri: friend.avatar }}
-                    style={[
-                      styles.avatarImage,
-                      !isSelected && styles.grayscale,
-                    ]}
+                    style={[styles.avatarImage, !isSelected && styles.grayscale]}
                   />
                 ) : (
-                  // Placeholder for avatar
                   <View style={[styles.avatarPlaceholder, { backgroundColor: colors.primary }]} />
                 )}
               </View>
-              
+
               {friend.isOnline && (
                 <View
                   style={[
@@ -83,6 +90,17 @@ const styles = StyleSheet.create({
   friendItem: {
     width: 70,
     alignItems: 'center',
+  },
+  manageButtonInner: {
+    backgroundColor: "#ccc",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  manageButtonText: {
+    fontSize: 24,
+    color: "#333",
+    fontWeight: "bold",
   },
   avatarContainer: {
     position: 'relative',

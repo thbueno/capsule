@@ -8,18 +8,22 @@ import {
   TouchableOpacity,
   Button,
   Alert,
+  TextInput,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import { router } from "expo-router";
 
 export default function FriendRequests() {
   const [requests, setRequests] = useState<any[]>([]);
-
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchRequests = async () => {
       const { data: authData } = await supabase.auth.getUser();
-      const uid =(authData?.user?.id ?? null);
+      const uid = authData?.user?.id ?? null;
+      setUserId(uid);
 
       if (!uid) return;
 
@@ -53,9 +57,102 @@ export default function FriendRequests() {
     }
   };
 
+  const handleSearch = async () => {
+    if (!searchTerm || !userId) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, username, handle")
+      .ilike("username", `%${searchTerm}%`)
+      .neq("id", userId) // exclude self
+
+    if (error) {
+      console.error("❌ Error searching users:", error);
+      return;
+    }
+
+    setSearchResults(data);
+  };
+
+  const sendFriendRequest = async (targetId: string) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        user_id: userId,
+        friend_id: targetId,
+        status: "pending",
+      });
+
+    if (error) {
+      console.error("❌ Error sending friend request:", error);
+      Alert.alert("Error", "Could not send request.");
+    } else {
+      Alert.alert("Success", "Friend request sent!");
+      setSearchResults((prev) => prev.filter((user) => user.id !== targetId));
+    }
+  };
+
   return (
     <View style={{ flex: 1, padding: 20 }}>
       <Text style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}>
+        Find Friends
+      </Text>
+
+      <View style={{ flexDirection: "row", marginBottom: 12 }}>
+        <TextInput
+          placeholder="Search username..."
+          value={searchTerm}
+          onChangeText={setSearchTerm}
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            borderColor: "#ccc",
+            padding: 8,
+            borderRadius: 6,
+            marginRight: 8,
+          }}
+        />
+        <Button title="Search" onPress={handleSearch} />
+      </View>
+
+      {searchResults.length > 0 && (
+        <>
+          <Text style={{ fontWeight: "bold", marginBottom: 6 }}>
+            Search Results
+          </Text>
+          {searchResults.map((user) => (
+            <View
+              key={user.id}
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingVertical: 8,
+              }}
+            >
+              <View>
+                <Text style={{ fontWeight: "bold" }}>{user.username}</Text>
+                <Text style={{ color: "gray" }}>@{user.handle}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => sendFriendRequest(user.id)}
+                style={{
+                  backgroundColor: "#007bff",
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 5,
+                }}
+              >
+                <Text style={{ color: "white" }}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </>
+      )}
+
+      <Text style={{ fontSize: 18, fontWeight: "bold", marginVertical: 16 }}>
         Incoming Friend Requests
       </Text>
 
