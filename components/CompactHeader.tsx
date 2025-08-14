@@ -6,10 +6,10 @@ import { Friend } from '../types';
 
 interface CompactHeaderProps {
   friends: Friend[];
-  selectedFriendId?: string;
-  onFriendSelect: (friendId: string) => void;
-  activeFilter: 'all' | 'starters' | 'moments';
-  onFilterChange: (filter: 'all' | 'starters' | 'moments') => void;
+  selectedFriendId: string;
+  onFriendSelect: (friendshipId: string, profileId: string) => void;
+  activeFilter: string;
+  onFilterChange: (filter: "all" | "starters" | "moments") => void;
 }
 
 export const CompactHeader: React.FC<CompactHeaderProps> = ({
@@ -23,20 +23,22 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
   const insets = useSafeAreaInsets();
 
   const filters = [
-    { key: 'all' as const, label: 'all' },
-    { key: 'starters' as const, label: 'starters' },
-    { key: 'moments' as const, label: 'moments' },
+    { key: "all" as const, label: "all" },
+    { key: "starters" as const, label: "starters" },
+    { key: "moments" as const, label: "moments" },
   ];
 
   return (
-    <View style={[
-      styles.container, 
-      { 
-        backgroundColor: colors.background,
-        paddingTop: insets.top + 8,
-        height: insets.top + 80,
-      }
-    ]}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.background,
+          paddingTop: insets.top + 8,
+          height: insets.top + 80,
+        },
+      ]}
+    >
       {/* Filter Tabs */}
       <View style={styles.filtersContainer}>
         {filters.map((filter) => (
@@ -45,7 +47,10 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
             style={[
               styles.filterTab,
               {
-                backgroundColor: activeFilter === filter.key ? colors.primary : colors.overlayLight,
+                backgroundColor:
+                  activeFilter === filter.key
+                    ? colors.primary
+                    : colors.overlayLight,
               },
             ]}
             onPress={() => onFilterChange(filter.key)}
@@ -55,7 +60,10 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
               style={[
                 styles.filterText,
                 {
-                  color: activeFilter === filter.key ? colors.title : colors.text,
+                  color:
+                    activeFilter === filter.key
+                      ? colors.title
+                      : colors.text,
                 },
               ]}
             >
@@ -63,7 +71,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
             </Text>
           </TouchableOpacity>
         ))}
-        
+
         {/* Friend Avatars */}
         <ScrollView
           horizontal
@@ -73,7 +81,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
         >
           {friends.slice(0, 3).map((friend, index) => (
             <TouchableOpacity
-              key={friend.id}
+              key={friend.friendshipId}
               style={[
                 styles.friendAvatar,
                 {
@@ -82,19 +90,32 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
                   zIndex: friends.length - index,
                 },
               ]}
-              onPress={() => onFriendSelect(friend.id)}
+              onPress={() =>
+                onFriendSelect(friend.friendshipId, friend.profileId)
+              }
               activeOpacity={0.8}
             >
               <Image
-                source={{ uri: friend.avatar }}
-                style={styles.avatarImage}
+                source={
+                  friend.avatar && friend.avatar.startsWith("http")
+                    ? { uri: friend.avatar }
+                    : require("../assets/default-avatar.jpg")
+                }
+                style={[styles.avatarImage]}
               />
             </TouchableOpacity>
           ))}
-          
+
           {friends.length > 3 && (
-            <View style={[styles.moreIndicator, { backgroundColor: colors.textSecondary }]}>
-              <Text style={[styles.moreText, { color: colors.background }]}>
+            <View
+              style={[
+                styles.moreIndicator,
+                { backgroundColor: colors.textSecondary },
+              ]}
+            >
+              <Text
+                style={[styles.moreText, { color: colors.background }]}
+              >
                 +{friends.length - 3}
               </Text>
             </View>
@@ -104,6 +125,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
     </View>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {

@@ -17,45 +17,50 @@ import { StarterCard } from "@/components/StarterCard";
 import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
 import { supabase } from "@/lib/supabase";
 import { Friend } from "@/types";
+import { SharedFriendPage } from "@/app/shared-friend";
 
-// Replace these later with Supabase-connected data
-const sampleStarters = [
-  {
-    id: "1",
-    text: "What's the most interesting thing that happened to you this week?",
-  },
-  {
-    id: "2",
-    text: "If you could have dinner with anyone, living or dead, who would it be?",
-  },
-  { id: "3", text: "What's a skill you'd love to learn and why?" },
-];
-
-const sampleMoments = [
-  { id: "1", imageUri: "https://picsum.photos/400/500?random=10" },
+// Replace these later with Supabase-connected 
+const sampleStarters = [ 
+  { id: "1", text: "What's the most interesting thing that happened to you this week?" },
+  { id: "2", text: "If you could have dinner with anyone, living or dead, who would it be?" },
+  { id: "3", text: "What's a skill you'd love to learn and why?" }
+]; 
+    
+const sampleMoments = [ 
+  { id: "1", imageUri: "https://picsum.photos/400/500?random=10" }, 
   { id: "2", imageUri: "https://picsum.photos/400/500?random=11" },
-  { id: "3", imageUri: "https://picsum.photos/400/500?random=12" },
+  { id: "3", imageUri: "https://picsum.photos/400/500?random=12" }
 ];
 
 function MainScreenContent() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  
+  // State management
   const [userId, setUserId] = useState<string | null>(null);
   const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
+  
+  // Selection state - keeping all three for different components that might need them
   const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
+  const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  
+  const [viewMode, setViewMode] = useState<"main" | "sharedFriend">("main");
   const [activeFilter, setActiveFilter] = useState<"all" | "starters" | "moments">("all");
   const [isChatMode, setIsChatMode] = useState(false);
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const SCROLL_THRESHOLD = 150;
-  const headerHeight = insets.top + 72;
 
   useEffect(() => {
     const fetchFriends = async () => {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
-      if (!uid) return;
+      if (!uid) {
+        console.log("No authenticated user found");
+        return;
+      }
       setUserId(uid);
 
       // Fetch current user's profile for avatar
@@ -71,6 +76,7 @@ function MainScreenContent() {
         setUserAvatarUrl(profileData?.avatar_url ?? null);
       }
 
+      // Fetch friendships with profile data
       const { data, error } = await supabase
         .from("friendships")
         .select(`
@@ -96,21 +102,33 @@ function MainScreenContent() {
         return;
       }
 
-      const friendsList: Friend[] = data.map((f: any) => {
-        const isSender = f.user_id === uid;
-        const profile = isSender ? f.friend_profile : f.user_profile;
+      console.log("Fetched friendships data:", data);
 
+      // Transform the data to match Friend type
+      const friendsList: Friend[] = data.map((friendship: any) => {
+        // Determine which profile is the friend (not the current user)
+        const isSender = friendship.user_id === uid;
+        const friendProfile = isSender ? friendship.friend_profile : friendship.user_profile;
+        
         return {
-          id: f.id,
-          name: profile?.username ?? "Unknown", // 🔄 Rename `username` → `name`
-          avatar: profile?.avatar_url ?? `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
-          isOnline: false, // 🔧 Dummy value unless you track online status
+          friendshipId: friendship.id,           // The friendship record ID
+          profileId: friendProfile?.id ?? "",    // The friend's profile ID
+          id: friendProfile?.id ?? "",           // Also set id for compatibility
+          name: friendProfile?.username ?? "Unknown",
+          avatar: friendProfile?.avatar_url ?? `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
+          isOnline: false, // You can implement online status tracking later
         };
       });
 
+      console.log("Processed friends list:", friendsList);
       setFriends(friendsList);
+      
+      // Set the first friend as selected if any exist
       if (friendsList.length > 0) {
-        setSelectedFriendId(friendsList[0].id);
+        const firstFriend = friendsList[0];
+        setSelectedFriendId(firstFriend.profileId);
+        setSelectedFriendshipId(firstFriend.friendshipId);
+        setSelectedProfileId(firstFriend.profileId);
       }
     };
 
@@ -142,16 +160,16 @@ function MainScreenContent() {
     extrapolate: "clamp",
   });
 
-  const contentPaddingBottom = scrollY.interpolate({
-    inputRange: [SCROLL_THRESHOLD - 50, SCROLL_THRESHOLD],
-    outputRange: [0, 100],
-    extrapolate: "clamp",
-  });
+  const selectedFriend = friends.find((f) => f.profileId === selectedFriendId);
 
-  const selectedFriend = friends.find((f) => f.id === selectedFriendId);
-
+  // Handle friend selection - update all related state
   const handleFriendSelect = (friendId: string) => {
-    setSelectedFriendId(friendId);
+    const friend = friends.find(f => f.profileId === friendId);
+    if (friend) {
+      setSelectedFriendId(friend.profileId);
+      setSelectedFriendshipId(friend.friendshipId);
+      setViewMode("sharedFriend");
+    }
   };
 
   const handleFilterChange = (filter: "all" | "starters" | "moments") => {
@@ -161,6 +179,11 @@ function MainScreenContent() {
   const handleSendMessage = (message: string) => {
     console.log("Send message:", message);
   };
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    { useNativeDriver: false }
+  );
 
   const getFilteredContent = () => {
     const content = [];
@@ -197,10 +220,12 @@ function MainScreenContent() {
       <StatusBar barStyle="light-content" translucent backgroundColor={colors.background} />
 
       {/* Full Header */}
-      <Animated.View style={[styles.headerContainer, { opacity: headerOpacity }]}>
-        <Header title="Capsules"
-         avatarUrl={userAvatarUrl ?? undefined}
-          onProfilePress={() => console.log("Profile pressed")} />
+      <Animated.View style={[styles.headerContainer, { opacity: headerOpacity}]}>
+        <Header 
+          title="Capsules"
+          avatarUrl={userAvatarUrl ?? undefined}
+          onProfilePress={() => console.log("Profile pressed")} 
+        />
       </Animated.View>
 
       {/* Compact Header */}
@@ -229,34 +254,33 @@ function MainScreenContent() {
         />
       </Animated.View>
 
-      {/* Scrollable Content */}
-      <Animated.ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          {
-            useNativeDriver: false,
-            listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-              setIsChatMode(event.nativeEvent.contentOffset.y >= SCROLL_THRESHOLD);
-            },
-          }
-        )}
-        scrollEventThrottle={16}
-        contentContainerStyle={{
-          paddingTop: headerHeight,
-          paddingBottom: contentPaddingBottom,
-        }}
-      >
-        <Animated.View style={{ opacity: friendsCarouselOpacity }}>
-          <FriendsCarousel
-            friends={friends}
-            selectedFriendId={selectedFriendId || ""}
-            onFriendSelect={handleFriendSelect}
-          />
-        </Animated.View>
+      {/* Friends Carousel */}
+      <Animated.View style={{ opacity: friendsCarouselOpacity,  zIndex: 15 }}>
+        <FriendsCarousel
+          friends={friends}
+          selectedFriendId={selectedFriendId || ""}
+          onFriendSelect={handleFriendSelect}
+        />
+      </Animated.View>
 
-        {getFilteredContent()}
+      <Animated.ScrollView
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {viewMode === "main" ? (
+          <>
+            <View style={{ height: 200 }} />
+            {getFilteredContent()}
+          </>
+        ) : (
+          <SharedFriendPage
+            friendshipId={selectedFriendshipId!}
+            onBack={() => setViewMode("main")}
+          />
+        )}
       </Animated.ScrollView>
 
       {/* Chat Interface */}
@@ -288,7 +312,42 @@ function MainScreenContent() {
   );
 }
 
-export default function Index() {
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  compactHeaderContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 11,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 200, // Space for headers and friends carousel
+    paddingHorizontal: 16,
+    paddingBottom: 100,
+  },
+  chatContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 12,
+  },
+});
+
+export default function App() {
   return (
     <ThemeProvider>
       <MainScreenContent />
@@ -296,32 +355,3 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  headerContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
-  compactHeaderContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 11,
-  },
-  chatContainer: {
-    zIndex: 12,
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-});
