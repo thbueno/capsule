@@ -1,5 +1,3 @@
-
-
 import { useEffect, useState } from "react";
 import {
   View,
@@ -60,18 +58,49 @@ export default function FriendRequests() {
   const handleSearch = async () => {
     if (!searchTerm || !userId) return;
 
-    const { data, error } = await supabase
+    // 1. Find users matching the search
+    const { data: users, error } = await supabase
       .from("profiles")
       .select("id, username, handle")
       .ilike("username", `%${searchTerm}%`)
-      .neq("id", userId) // exclude self
+      .neq("id", userId);
 
     if (error) {
       console.error("❌ Error searching users:", error);
       return;
     }
 
-    setSearchResults(data);
+    if (!users || users.length === 0) {
+      setSearchResults([]);
+      return;
+    }
+
+    // 2. Check friendship status for each result
+    const resultsWithStatus = await Promise.all(
+      users.map(async (user) => {
+        const { data: friendship } = await supabase
+          .from("friendships")
+          .select("*")
+          .or(
+            `and(user_id.eq.${userId},friend_id.eq.${user.id}),and(user_id.eq.${user.id},friend_id.eq.${userId})`
+          )
+          .maybeSingle();
+
+        return {
+          ...user,
+          friendshipStatus: friendship?.status ?? null,
+          friendshipId: friendship?.id ?? null,
+          requesterId: friendship?.user_id ?? null,
+        };
+      })
+    );
+
+    // 3. Exclude already accepted friends
+    const filtered = resultsWithStatus.filter(
+      (user) => user.friendshipStatus !== "accepted"
+    );
+
+    setSearchResults(filtered);
   };
 
   const sendFriendRequest = async (targetId: string) => {
@@ -90,8 +119,82 @@ export default function FriendRequests() {
       Alert.alert("Error", "Could not send request.");
     } else {
       Alert.alert("Success", "Friend request sent!");
-      setSearchResults((prev) => prev.filter((user) => user.id !== targetId));
+      setSearchResults((prev) =>
+        prev.map((u) =>
+          u.id === targetId
+            ? { ...u, friendshipStatus: "pending", requesterId: userId }
+            : u
+        )
+      );
     }
+  };
+
+  const acceptFriendRequest = async (friendshipId: string) => {
+    const { error } = await supabase
+      .from("friendships")
+      .update({ status: "accepted" })
+      .eq("id", friendshipId);
+
+    if (error) {
+      console.error("❌ Error accepting request:", error);
+      Alert.alert("Error", "Could not accept request.");
+    } else {
+      Alert.alert("Success", "Friend request accepted!");
+      setRequests((prev) => prev.filter((r) => r.id !== friendshipId));
+      setSearchResults((prev) =>
+        prev.filter((u) => u.friendshipId !== friendshipId)
+      );
+    }
+  };
+
+  const renderActionButton = (user: any) => {
+    if (user.friendshipStatus === "pending") {
+      if (user.requesterId === userId) {
+        // You already sent request
+        return (
+          <View
+            style={{
+              backgroundColor: "gray",
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 5,
+            }}
+          >
+            <Text style={{ color: "white" }}>Requested</Text>
+          </View>
+        );
+      } else {
+        // They sent request → accept it
+        return (
+          <TouchableOpacity
+            onPress={() => acceptFriendRequest(user.friendshipId)}
+            style={{
+              backgroundColor: "green",
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 5,
+            }}
+          >
+            <Text style={{ color: "white" }}>Accept</Text>
+          </TouchableOpacity>
+        );
+      }
+    }
+
+    // Default: no friendship → show Add button
+    return (
+      <TouchableOpacity
+        onPress={() => sendFriendRequest(user.id)}
+        style={{
+          backgroundColor: "#007bff",
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          borderRadius: 5,
+        }}
+      >
+        <Text style={{ color: "white" }}>Add</Text>
+      </TouchableOpacity>
+    );
   };
 
   return (
@@ -136,17 +239,7 @@ export default function FriendRequests() {
                 <Text style={{ fontWeight: "bold" }}>{user.username}</Text>
                 <Text style={{ color: "gray" }}>@{user.handle}</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => sendFriendRequest(user.id)}
-                style={{
-                  backgroundColor: "#007bff",
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 5,
-                }}
-              >
-                <Text style={{ color: "white" }}>Add</Text>
-              </TouchableOpacity>
+              {renderActionButton(user)}
             </View>
           ))}
         </>
@@ -215,3 +308,4 @@ export default function FriendRequests() {
     </View>
   );
 }
+
