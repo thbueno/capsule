@@ -1,19 +1,20 @@
+import { Ionicons } from "@expo/vector-icons";
+import { decode } from "base64-arraybuffer";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
 import { useState } from "react";
 import {
-  View,
-  Text,
-  Platform,
-  TextInput,
-  Button,
   Alert,
-  StyleSheet,
   Image,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import * as ImagePicker from "expo-image-picker";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
-import { router } from "expo-router";
-import { decode } from "base64-arraybuffer";
-
 
 export default function CreateProfile() {
   const [firstName, setFirstName] = useState("");
@@ -36,7 +37,8 @@ export default function CreateProfile() {
   };
 
   const uploadAvatar = async (userId: string): Promise<string | null> => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const permissionResult =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissionResult.granted) {
       Alert.alert("Permission denied", "Camera roll permission is required.");
       return null;
@@ -101,7 +103,9 @@ export default function CreateProfile() {
   };
 
   const handleCreateProfile = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       Alert.alert("Not logged in");
@@ -136,39 +140,269 @@ export default function CreateProfile() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Your Profile</Text>
-
-      <TextInput value={firstName} onChangeText={setFirstName} placeholder="First Name" style={styles.input} />
-      <TextInput value={lastName} onChangeText={setLastName} placeholder="Last Name" style={styles.input} />
-      <TextInput value={username} onChangeText={setUsername} placeholder="Username" style={styles.input} />
-      <TextInput value={handle} onChangeText={setHandle} placeholder="Handle (e.g. @yourname)" style={styles.input} autoCapitalize="none" />
-
-      <Button title="Choose Profile Picture" onPress={pickImage} />
-      {imageUri && <Image source={{ uri: imageUri }} style={styles.image} />}
-
-      <View style={{ marginTop: 16 }}>
-        <Button title={loading ? "Creating..." : "Create Profile"} onPress={handleCreateProfile} disabled={loading} />
+    <SafeAreaView style={styles.container}>
+      {/* Status Bar Area */}
+      <View style={styles.statusBar}>
+        <View style={styles.dynamicIsland} />
       </View>
-    </View>
+
+      {/* Progress Bar */}
+      <View style={styles.progressContainer}>
+        <View style={[styles.progressStep, styles.progressStepActive]} />
+        <View style={[styles.progressStep, styles.progressStepActive]} />
+        <View style={styles.progressStep} />
+        <View style={styles.progressStep} />
+      </View>
+
+      {/* Navigation Header */}
+      <View style={styles.navigationHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="chevron-back" size={16} color="#6B6B6B" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Page Title */}
+      <Text style={styles.pageTitle}>Create Profile</Text>
+
+      {/* Avatar Section */}
+      <View style={styles.avatarContainer}>
+        <TouchableOpacity style={styles.avatarCircle} onPress={pickImage}>
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} style={styles.avatarImage} />
+          ) : (
+            <Ionicons name="person-outline" size={48} color="#D4A574" />
+          )}
+          <View style={styles.editButton}>
+            <Ionicons name="pencil" size={18} color="#FFFFFF" />
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* Form Fields */}
+      <View style={styles.formContainer}>
+        <View style={styles.fieldContainer}>
+          <Text style={styles.fieldLabel}>First Name</Text>
+          <TextInput
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="Enter your first name"
+            placeholderTextColor="#A8A8A8"
+            style={styles.fieldInput}
+          />
+        </View>
+
+        <View style={styles.fieldContainer}>
+          <Text style={styles.fieldLabel}>Last Name</Text>
+          <TextInput
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Enter your last name"
+            placeholderTextColor="#A8A8A8"
+            style={styles.fieldInput}
+          />
+        </View>
+
+        <View style={styles.fieldContainer}>
+          <Text style={styles.fieldLabel}>Username</Text>
+          <TextInput
+            value={username}
+            onChangeText={setUsername}
+            placeholder="your username"
+            placeholderTextColor="#A8A8A8"
+            style={styles.fieldInput}
+            autoCapitalize="none"
+          />
+        </View>
+
+        <View style={styles.fieldContainer}>
+          <Text style={styles.fieldLabel}>Handle</Text>
+          <TextInput
+            value={handle}
+            onChangeText={setHandle}
+            placeholder="@yourname"
+            placeholderTextColor="#A8A8A8"
+            style={styles.fieldInput}
+            autoCapitalize="none"
+          />
+        </View>
+      </View>
+
+      {/* Spacer to push button to bottom */}
+      <View style={styles.spacer} />
+
+      {/* Primary Button */}
+      <TouchableOpacity
+        style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+        onPress={handleCreateProfile}
+        disabled={loading}
+      >
+        <Text style={styles.primaryButtonText}>
+          {loading ? "Creating..." : "save changes"}
+        </Text>
+      </TouchableOpacity>
+
+      {/* Link Text */}
+      <TouchableOpacity onPress={() => router.replace("/login")}>
+        <Text style={styles.linkText}>Already have an account? Log in</Text>
+      </TouchableOpacity>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 20 },
-  title: { fontSize: 24, marginBottom: 20, textAlign: "center" },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 10,
-    marginBottom: 12,
-    borderRadius: 5,
+  container: {
+    flex: 1,
+    backgroundColor: "#F5F2E8", // Primary background from design system
+    width: "100%",
+    minHeight: "100%",
   },
-  image: {
+  statusBar: {
+    height: 44,
+    backgroundColor: "transparent",
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dynamicIsland: {
+    width: 126,
+    height: 37,
+    backgroundColor: "#000000",
+    borderRadius: 19,
+    position: "absolute",
+    top: 8,
+  },
+  progressContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 20,
+    marginTop: 16,
+  },
+  progressStep: {
+    height: 4,
+    flex: 1,
+    borderRadius: 2,
+    backgroundColor: "#E8E5DD", // Pale gray from design system
+  },
+  progressStepActive: {
+    backgroundColor: "#FF4D36", // Orange accent from design system
+  },
+  navigationHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    marginTop: 8,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "#E8E5DD",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pageTitle: {
+    fontSize: 28,
+    fontWeight: "600",
+    lineHeight: 33.6, // 1.2 line height
+    letterSpacing: -0.56, // -0.02em
+    color: "#2D2D2D", // Primary text color
+    textAlign: "center",
+    marginTop: 32,
+    marginBottom: 48,
+    marginHorizontal: 20,
+  },
+  avatarContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 48,
+  },
+  avatarCircle: {
     width: 120,
     height: 120,
+    backgroundColor: "transparent",
+    borderWidth: 3,
+    borderColor: "#D4A574", // Accent gold color
     borderRadius: 60,
-    marginTop: 12,
-    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  avatarImage: {
+    width: 114, // Slightly smaller to account for border
+    height: 114,
+    borderRadius: 57,
+  },
+  editButton: {
+    width: 36,
+    height: 36,
+    backgroundColor: "#2D2D2D",
+    borderRadius: 18,
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  formContainer: {
+    paddingHorizontal: 20,
+  },
+  fieldContainer: {
+    marginBottom: 32,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 19.6, // 1.4 line height
+    color: "#D4A574", // Accent gold color
+    marginBottom: 12,
+  },
+  fieldInput: {
+    width: "100%",
+    height: 56,
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "#E8E5DD",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    fontWeight: "400",
+    color: "#2D2D2D",
+  },
+  spacer: {
+    flex: 1,
+  },
+  primaryButton: {
+    height: 56,
+    backgroundColor: "#FF4D36", // Orange accent
+    borderRadius: 12,
+    marginHorizontal: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.5,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    letterSpacing: 0.32, // 0.02em
+  },
+  linkText: {
+    fontSize: 16,
+    fontWeight: "400",
+    lineHeight: 24, // 1.5 line height
+    color: "#D4A574", // Accent gold color
+    textAlign: "center",
+    marginHorizontal: 20,
+    marginBottom: 32,
   },
 });
