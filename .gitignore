@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+context/
 
 # Expo
 .expo/
@@ -9,6 +10,7 @@ dist/
 web-build/
 .kiro/
 tmp/
+
 expo-env.d.ts
 
 # Native
