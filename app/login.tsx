@@ -68,7 +68,7 @@ export default function Login() {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Create a password</Text>
+            <Text style={styles.label}>Enter password</Text>
             <View style={styles.passwordContainer}>
               <TextInput
                 value={password}
@@ -104,6 +104,11 @@ export default function Login() {
           </View>
 
           <TouchableOpacity style={styles.secondaryButton}>
+            <Ionicons name="mail-outline" size={20} color="#2C2C2C" />
+            <Text style={styles.secondaryButtonText} onPress={goToRegister}>Continue with Email</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryButton}>
             <Ionicons name="logo-google" size={20} color="#2C2C2C" />
             <Text style={styles.secondaryButtonText}>Continue with Google</Text>
           </TouchableOpacity>
@@ -111,7 +116,7 @@ export default function Login() {
           <View style={styles.linkContainer}>
             <Text style={styles.linkText}>
               Already have an account?{" "}
-              <Text style={styles.linkTextBold} onPress={goToRegister}>
+              <Text style={styles.linkTextBold} onPress={handleLogin}>
                 Log in
               </Text>
             </Text>
