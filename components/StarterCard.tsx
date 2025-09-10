@@ -3,7 +3,11 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeProvider';
 import { StarterCardProps } from '../types';
 
-export const StarterCard: React.FC<StarterCardProps> = ({ text, onResponse }) => {
+export const StarterCard: React.FC<StarterCardProps & { backgroundColor?: string }> = ({
+  text,
+  onResponse,
+  backgroundColor,
+}) => {
   const { colors, theme } = useTheme();
 
   return (
@@ -11,28 +15,27 @@ export const StarterCard: React.FC<StarterCardProps> = ({ text, onResponse }) =>
       style={[
         styles.container,
         {
-          backgroundColor: colors.cardBackground,
+          backgroundColor: backgroundColor || colors.cardBackground, // 👈 use category hex if available
           ...theme.shadows.md,
         },
       ]}
       onPress={onResponse}
       activeOpacity={0.9}
     >
-      {/* Quote icon placeholder - would use actual icon library in production */}
+      {/* Quote icon placeholder */}
       <View style={styles.quoteIcon}>
         <Text style={[styles.quoteText, { color: colors.cardText }]}>"</Text>
       </View>
-      
+
       <Text style={[styles.text, { color: colors.cardText }]}>
         {text}
       </Text>
-      
+
       <TouchableOpacity
         style={[styles.responseButton, { backgroundColor: colors.overlayLight }]}
         onPress={onResponse}
         activeOpacity={0.7}
       >
-        {/* Message icon placeholder */}
         <Text style={[styles.responseIcon, { color: colors.cardText }]}>💬</Text>
       </TouchableOpacity>
     </TouchableOpacity>

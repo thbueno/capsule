@@ -53,6 +53,32 @@ function MainScreenContent() {
   const scrollY = useRef(new Animated.Value(0)).current;
   const SCROLL_THRESHOLD = 150;
 
+  const [starters, setStarters] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchStarters = async () => {
+      const { data, error } = await supabase
+        .from("starters")
+        .select("*");
+
+      if (error) {
+        console.error("❌ Error fetching starters:", error);
+        return;
+      }
+
+      if (data) {
+        // Shuffle randomly and limit to e.g. 5
+        console.log("Fetched starters:", data); // 🔍 check this
+
+        const shuffled = data.sort(() => 0.5 - Math.random()).slice(0, 5);
+        setStarters(shuffled);
+      }
+    };
+
+    fetchStarters();
+  }, []);
+
+
   useEffect(() => {
     const fetchFriends = async () => {
       const { data: authData } = await supabase.auth.getUser();
@@ -190,15 +216,17 @@ function MainScreenContent() {
 
     if (activeFilter === "all" || activeFilter === "starters") {
       content.push(
-        ...sampleStarters.map((starter) => (
+        ...starters.map((starter) => (
           <StarterCard
             key={`starter-${starter.id}`}
             text={starter.text}
+            backgroundColor={starter.colour} // 👈 pass hex color to card
             onResponse={() => console.log("Starter response")}
           />
         ))
       );
     }
+
 
     if (activeFilter === "all" || activeFilter === "moments") {
       content.push(
