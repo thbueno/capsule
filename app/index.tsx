@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
 import {
   Animated,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   StatusBar,
   StyleSheet,
   View,
+  TouchableOpacity,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatInterface } from "@/components/ChatInterface";
@@ -18,19 +17,7 @@ import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
 import { supabase } from "@/lib/supabase";
 import { Friend } from "@/types";
 import { SharedFriendPage } from "@/app/shared-friend";
-
-// Replace these later with Supabase-connected 
-const sampleStarters = [ 
-  { id: "1", text: "What's the most interesting thing that happened to you this week?" },
-  { id: "2", text: "If you could have dinner with anyone, living or dead, who would it be?" },
-  { id: "3", text: "What's a skill you'd love to learn and why?" }
-]; 
-    
-const sampleMoments = [ 
-  { id: "1", imageUri: "https://picsum.photos/400/500?random=10" }, 
-  { id: "2", imageUri: "https://picsum.photos/400/500?random=11" },
-  { id: "3", imageUri: "https://picsum.photos/400/500?random=12" }
-];
+import { ChatScreen } from "./chat";
 
 function MainScreenContent() {
   const { colors } = useTheme();
@@ -41,14 +28,15 @@ function MainScreenContent() {
   const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
   
-  // Selection state - keeping all three for different components that might need them
+  // Selection state
   const [selectedFriendId, setSelectedFriendId] = useState<string | null>(null);
   const [selectedFriendshipId, setSelectedFriendshipId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  
-  const [viewMode, setViewMode] = useState<"main" | "sharedFriend">("main");
+
+  // View mode management
+  const [viewMode, setViewMode] = useState<"main" | "sharedFriend" | "chat">("main");
+  const [chatFriend, setChatFriend] = useState<Friend | null>(null);
   const [activeFilter, setActiveFilter] = useState<"all" | "starters" | "moments">("all");
-  const [isChatMode, setIsChatMode] = useState(false);
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const SCROLL_THRESHOLD = 150;
@@ -62,14 +50,11 @@ function MainScreenContent() {
         .select("*");
 
       if (error) {
-        console.error("❌ Error fetching starters:", error);
+        console.error("Error fetching starters:", error);
         return;
       }
 
       if (data) {
-        // Shuffle randomly and limit to e.g. 5
-        console.log("Fetched starters:", data); // 🔍 check this
-
         const shuffled = data.sort(() => 0.5 - Math.random()).slice(0, 5);
         setStarters(shuffled);
       }
@@ -77,7 +62,6 @@ function MainScreenContent() {
 
     fetchStarters();
   }, []);
-
 
   useEffect(() => {
     const fetchFriends = async () => {
@@ -124,29 +108,25 @@ function MainScreenContent() {
         .eq("status", "accepted");
 
       if (error) {
-        console.error("❌ Error fetching friends:", error);
+        console.error("Error fetching friends:", error);
         return;
       }
 
-      console.log("Fetched friendships data:", data);
-
       // Transform the data to match Friend type
       const friendsList: Friend[] = data.map((friendship: any) => {
-        // Determine which profile is the friend (not the current user)
         const isSender = friendship.user_id === uid;
         const friendProfile = isSender ? friendship.friend_profile : friendship.user_profile;
         
         return {
-          friendshipId: friendship.id,           // The friendship record ID
-          profileId: friendProfile?.id ?? "",    // The friend's profile ID
-          id: friendProfile?.id ?? "",           // Also set id for compatibility
+          friendshipId: friendship.id,
+          profileId: friendProfile?.id ?? "",
+          id: friendProfile?.id ?? "",
           name: friendProfile?.username ?? "Unknown",
           avatar: friendProfile?.avatar_url ?? `https://picsum.photos/120/120?random=${Math.floor(Math.random() * 1000)}`,
-          isOnline: false, // You can implement online status tracking later
+          isOnline: false,
         };
       });
 
-      console.log("Processed friends list:", friendsList);
       setFriends(friendsList);
       
       // Set the first friend as selected if any exist
@@ -160,6 +140,15 @@ function MainScreenContent() {
 
     fetchFriends();
   }, []);
+
+  // Function to open chat with the selected friend
+  const openChat = () => {
+    const friend = friends.find(f => f.profileId === selectedFriendId);
+    if (friend) {
+      setChatFriend(friend);
+      setViewMode("chat");
+    }
+  };
 
   // Animation values
   const headerOpacity = scrollY.interpolate({
@@ -188,22 +177,19 @@ function MainScreenContent() {
 
   const selectedFriend = friends.find((f) => f.profileId === selectedFriendId);
 
-  // Handle friend selection - update all related state
+  // Handle friend selection
   const handleFriendSelect = (friendId: string) => {
     const friend = friends.find(f => f.profileId === friendId);
     if (friend) {
       setSelectedFriendId(friend.profileId);
       setSelectedFriendshipId(friend.friendshipId);
-      setViewMode("sharedFriend");
+      setSelectedProfileId(friend.profileId);
+      // Don't automatically open sharedFriend view, just update selection
     }
   };
 
   const handleFilterChange = (filter: "all" | "starters" | "moments") => {
     setActiveFilter(filter);
-  };
-
-  const handleSendMessage = (message: string) => {
-    console.log("Send message:", message);
   };
 
   const handleScroll = Animated.event(
@@ -220,15 +206,21 @@ function MainScreenContent() {
           <StarterCard
             key={`starter-${starter.id}`}
             text={starter.text}
-            backgroundColor={starter.colour} // 👈 pass hex color to card
+            backgroundColor={starter.colour}
             onResponse={() => console.log("Starter response")}
           />
         ))
       );
     }
 
-
     if (activeFilter === "all" || activeFilter === "moments") {
+      // Sample moments for now
+      const sampleMoments = [ 
+        { id: "1", imageUri: "https://picsum.photos/400/500?random=10" }, 
+        { id: "2", imageUri: "https://picsum.photos/400/500?random=11" },
+        { id: "3", imageUri: "https://picsum.photos/400/500?random=12" }
+      ];
+      
       content.push(
         ...sampleMoments.map((moment) => (
           <MomentCard
@@ -243,99 +235,137 @@ function MainScreenContent() {
     return content;
   };
 
+  // Handle chat interface interactions
+  const handleChatInterfacePress = () => {
+    openChat();
+  };
+
+  const handleSendQuickMessage = (message: string) => {
+    // For quick messages, you might want to send directly without opening full chat
+    // Or you could open chat and pre-fill the message
+    openChat();
+    // TODO: Pass the message to the chat screen to send
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle="light-content" translucent backgroundColor={colors.background} />
 
-      {/* Full Header */}
-      <Animated.View style={[styles.headerContainer, { opacity: headerOpacity}]}>
-        <Header 
-          title="Capsules"
-          avatarUrl={userAvatarUrl ?? undefined}
-          onProfilePress={() => console.log("Profile pressed")} 
+      {viewMode === "chat" && chatFriend ? (
+        <ChatScreen
+          friendshipId={chatFriend.friendshipId}
+          friendId={chatFriend.profileId}
+          friendName={chatFriend.name}
+          friendAvatar={chatFriend.avatar}
+          onBack={() => {
+            setViewMode("main");
+            setChatFriend(null);
+          }}
         />
-      </Animated.View>
+      ) : (
+        <>
+          {/* Full Header */}
+          <Animated.View style={[styles.headerContainer, { opacity: headerOpacity }]}>
+            <Header 
+              title="Capsules"
+              avatarUrl={userAvatarUrl ?? undefined}
+              onProfilePress={() => console.log("Profile pressed")} 
+            />
+          </Animated.View>
 
-      {/* Compact Header */}
-      <Animated.View
-        style={[
-          styles.compactHeaderContainer,
-          {
-            opacity: compactHeaderOpacity,
-            transform: [
+          {/* Compact Header */}
+          <Animated.View
+            style={[
+              styles.compactHeaderContainer,
               {
-                translateY: compactHeaderOpacity.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-80, 0],
-                }),
+                opacity: compactHeaderOpacity,
+                transform: [
+                  {
+                    translateY: compactHeaderOpacity.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-80, 0],
+                    }),
+                  },
+                ],
               },
-            ],
-          },
-        ]}
-      >
-        <CompactHeader
-          friends={friends}
-          selectedFriendId={selectedFriendId || ""}
-          onFriendSelect={handleFriendSelect}
-          activeFilter={activeFilter}
-          onFilterChange={handleFilterChange}
-        />
-      </Animated.View>
+            ]}
+          >
+            <CompactHeader
+              friends={friends}
+              selectedFriendId={selectedFriendId || ""}
+              onFriendSelect={handleFriendSelect}
+              activeFilter={activeFilter}
+              onFilterChange={handleFilterChange}
+            />
+          </Animated.View>
 
-      {/* Friends Carousel */}
-      <Animated.View style={{ opacity: friendsCarouselOpacity,  zIndex: 15 }}>
-        <FriendsCarousel
-          friends={friends}
-          selectedFriendId={selectedFriendId || ""}
-          onFriendSelect={handleFriendSelect}
-        />
-      </Animated.View>
+          {/* Friends Carousel */}
+          <Animated.View style={{ opacity: friendsCarouselOpacity, zIndex: 15 }}>
+            <FriendsCarousel
+              friends={friends}
+              selectedFriendId={selectedFriendId || ""}
+              onFriendSelect={handleFriendSelect}
+            />
+          </Animated.View>
 
-      <Animated.ScrollView
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        showsVerticalScrollIndicator={false}
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {viewMode === "main" ? (
-          <>
-            <View style={{ height: 200 }} />
-            {getFilteredContent()}
-          </>
-        ) : (
-          <SharedFriendPage
-            friendshipId={selectedFriendshipId!}
-            onBack={() => setViewMode("main")}
-          />
-        )}
-      </Animated.ScrollView>
+          <Animated.ScrollView
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+          >
+            {viewMode === "main" ? (
+              <>
+                <View style={{ height: 200 }} />
+                {getFilteredContent()}
+              </>
+            ) : viewMode === "sharedFriend" ? (
+              <SharedFriendPage
+                friendshipId={selectedFriendshipId!}
+                onBack={() => setViewMode("main")}
+              />
+            ) : null}
+          </Animated.ScrollView>
 
-      {/* Chat Interface */}
-      <Animated.View
-        style={[
-          styles.chatContainer,
-          {
-            opacity: chatInterfaceOpacity,
-            transform: [
+          {/* Persistent Chat Interface */}
+          <Animated.View
+            style={[
+              styles.chatContainer,
               {
-                translateY: chatInterfaceOpacity.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [100, 0],
-                }),
+                opacity: chatInterfaceOpacity,
+                transform: [
+                  {
+                    translateY: chatInterfaceOpacity.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [100, 0],
+                    }),
+                  },
+                ],
               },
-            ],
-          },
-        ]}
-        pointerEvents={isChatMode ? "auto" : "none"}
-      >
-        <ChatInterface
-          selectedFriendName={selectedFriend?.name}
-          onSendMessage={handleSendMessage}
-          onCameraPress={() => console.log("Camera pressed")}
-          onGalleryPress={() => console.log("Gallery pressed")}
-        />
-      </Animated.View>
+            ]}
+          >
+            <TouchableOpacity 
+              activeOpacity={0.95}
+              onPress={handleChatInterfacePress}
+              style={styles.chatTouchable}
+            >
+              <ChatInterface
+                selectedFriendName={selectedFriend?.name}
+                onSendMessage={handleSendQuickMessage}
+                onCameraPress={() => {
+                  openChat();
+                  // TODO: Open camera in chat view
+                }}
+                onGalleryPress={() => {
+                  openChat();
+                  // TODO: Open gallery in chat view
+                }}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 }
@@ -362,9 +392,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 200, // Space for headers and friends carousel
+    paddingTop: 200,
     paddingHorizontal: 16,
-    paddingBottom: 100,
+    paddingBottom: 120, // Increased to account for chat interface
   },
   chatContainer: {
     position: 'absolute',
@@ -372,6 +402,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 12,
+  },
+  chatTouchable: {
+    width: '100%',
   },
 });
 
@@ -382,4 +415,3 @@ export default function App() {
     </ThemeProvider>
   );
 }
-
