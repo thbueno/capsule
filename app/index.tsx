@@ -1,12 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
-import {
-  Animated,
-  StatusBar,
-  StyleSheet,
-  View,
-  TouchableOpacity,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SharedFriendPage } from "@/app/shared-friend";
 import { ChatInterface } from "@/components/ChatInterface";
 import { CompactHeader } from "@/components/CompactHeader";
 import { FriendsCarousel } from "@/components/FriendsCarousel";
@@ -16,7 +8,15 @@ import { StarterCard } from "@/components/StarterCard";
 import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
 import { supabase } from "@/lib/supabase";
 import { Friend } from "@/types";
-import { SharedFriendPage } from "@/app/shared-friend";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  StatusBar,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChatScreen } from "./chat";
 
 function MainScreenContent() {
@@ -184,7 +184,7 @@ function MainScreenContent() {
       setSelectedFriendId(friend.profileId);
       setSelectedFriendshipId(friend.friendshipId);
       setSelectedProfileId(friend.profileId);
-      // Don't automatically open sharedFriend view, just update selection
+      setViewMode("sharedFriend");
     }
   };
 
