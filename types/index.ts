@@ -1,10 +1,11 @@
 // Core data models for the Capsules app
 
 export interface Friend {
-  id: string;
+  friendshipId: string; // ID of the friendship record in Supabase
+  profileId: string;    // ID of the friend's profile
   name: string;
   avatar: string;
-  isOnline?: boolean;
+  isOnline: boolean;
 }
 
 export interface StarterCard {
@@ -23,8 +24,10 @@ export interface MomentCard {
 // Component prop interfaces
 export interface HeaderProps {
   title: string;
-  onProfilePress?: () => void;
+  onProfilePress: () => void;
+  avatarUrl?: string;
 }
+
 
 export interface FriendsCarouselProps {
   friends: Friend[];
