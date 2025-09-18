@@ -26,6 +26,7 @@ interface Message {
   content: string;
   created_at: string;
   is_read: boolean;
+  starter_id?: string; // Add starter_id to track starter-initiated messages
 }
 
 interface ChatScreenProps {
@@ -36,6 +37,8 @@ interface ChatScreenProps {
   onBack: () => void;
 }
 
+type TabType = 'all' | 'starters';
+
 export function ChatScreen({
   friendshipId,
   friendId,
@@ -45,18 +48,20 @@ export function ChatScreen({
 }: ChatScreenProps) {
   const { colors } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [starterMessages, setStarterMessages] = useState<Message[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const [inputText, setInputText] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false); // 👈 overlay state
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [startersMap, setStartersMap] = useState<Record<string, string>>({});
   const flatListRef = useRef<FlatList>(null);  
   const router = useRouter();
 
   useEffect(() => {
     initializeChat();
-    
-    // Set up real-time subscription
+
     const subscription = supabase
       .channel(`chat:${friendshipId}`)
       .on(
@@ -67,10 +72,33 @@ export function ChatScreen({
           table: 'messages',
           filter: `friendships_id=eq.${friendshipId}`,
         },
-        (payload) => {
+        async (payload) => {
           const newMessage = payload.new as Message;
+
+          // If message has starter_id and color not in map, fetch it
+          if (newMessage.starter_id && !startersMap[newMessage.starter_id]) {
+            const { data: starterData } = await supabase
+              .from('starters')
+              .select('id, colour')
+              .eq('id', newMessage.starter_id)
+              .single();
+
+            if (starterData) {
+              setStartersMap((prev) => ({
+                ...prev,
+                [starterData.id]: starterData.colour,
+              }));
+            }
+          }
+
+          // Add message to state
           setMessages((prev) => [newMessage, ...prev]);
-          
+
+          // Add to starter messages if it has a starter_id
+          if (newMessage.starter_id) {
+            setStarterMessages((prev) => [newMessage, ...prev]);
+          }
+
           // Mark as read if it's from the friend
           if (newMessage.sender_id === friendId) {
             markMessageAsRead(newMessage.id);
@@ -82,18 +110,16 @@ export function ChatScreen({
     return () => {
       subscription.unsubscribe();
     };
-  }, [friendshipId, friendId]);
+  }, [friendshipId, friendId, startersMap]);
 
   const initializeChat = async () => {
     try {
-      // Get current user
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id;
       if (!uid) return;
-      
       setUserId(uid);
 
-      // Fetch messages
+      // Fetch all messages
       const { data: messagesData, error } = await supabase
         .from('messages')
         .select('*')
@@ -107,17 +133,30 @@ export function ChatScreen({
       }
 
       setMessages(messagesData || []);
-      
+      setStarterMessages(messagesData?.filter(m => m.starter_id) || []);
+
+      // Fetch all starter colors
+      const starterIds = messagesData?.map(m => m.starter_id).filter(Boolean) || [];
+      if (starterIds.length > 0) {
+        const { data: startersData } = await supabase
+          .from('starters')
+          .select('id, colour')
+          .in('id', starterIds);
+
+        const map: Record<string, string> = {};
+        startersData?.forEach((s) => {
+          map[s.id] = s.colour;
+        });
+        setStartersMap(map);
+      }
+
       // Mark unread messages as read
       const unreadIds = messagesData
         ?.filter(m => m.recipient_id === uid && !m.is_read)
         .map(m => m.id) || [];
-      
+
       if (unreadIds.length > 0) {
-        await supabase
-          .from('messages')
-          .update({ is_read: true })
-          .in('id', unreadIds);
+        await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
       }
     } catch (error) {
       console.error('Error initializing chat:', error);
@@ -126,6 +165,7 @@ export function ChatScreen({
     }
   };
 
+
   const markMessageAsRead = async (messageId: string) => {
     await supabase
       .from('messages')
@@ -133,7 +173,7 @@ export function ChatScreen({
       .eq('id', messageId);
   };
 
-  const sendMessage = async () => {
+  const sendMessage = async (starterId?: string) => {
     if (!inputText.trim() || !userId || sending) return;
 
     setSending(true);
@@ -141,12 +181,19 @@ export function ChatScreen({
     setInputText('');
 
     try {
-      const { error } = await supabase.from('messages').insert({
+      const messageData: any = {
         sender_id: userId,
         recipient_id: friendId,
         friendships_id: friendshipId,
         content: messageContent,
-      });
+      };
+
+      // Add starter_id if provided
+      if (starterId) {
+        messageData.starter_id = starterId;
+      }
+
+      const { error } = await supabase.from('messages').insert(messageData);
 
       if (error) {
         console.error('Error sending message:', error);
@@ -162,7 +209,8 @@ export function ChatScreen({
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isOwnMessage = item.sender_id === userId;
-    
+    const starterColor = item.starter_id ? startersMap[item.starter_id] : null;
+
     return (
       <View
         style={[
@@ -173,9 +221,17 @@ export function ChatScreen({
         <View
           style={[
             styles.messageBubble,
-            { backgroundColor: isOwnMessage ? colors.primary : colors.backgroundSecondary },
+            {
+              backgroundColor: starterColor || (isOwnMessage ? colors.primary : colors.backgroundSecondary),
+            },
           ]}
         >
+          {item.starter_id && activeTab === 'all' && (
+            <View style={[styles.starterBadge, { backgroundColor: starterColor || colors.background }]}>
+              <Ionicons name="sparkles" size={12} color="#fff" />
+              <Text style={styles.starterBadgeText}>Starter</Text>
+            </View>
+          )}
           <Text
             style={[
               styles.messageText,
@@ -200,6 +256,7 @@ export function ChatScreen({
     );
   };
 
+
   const handleOpenOverlay = () => setShowOverlay(true);
   const handleCloseOverlay = () => setShowOverlay(false);
 
@@ -207,7 +264,12 @@ export function ChatScreen({
     setShowOverlay(false);
     router.push({
       pathname: "/StartConversation",
-      params: { friendshipId, friendId },
+      params: { 
+        friendshipId, 
+        friendId,
+        friendName,
+        returnToChat: 'true' // Flag to return to chat after selection
+      },
     });
   };
 
@@ -217,6 +279,10 @@ export function ChatScreen({
       pathname: "/FriendsView",
       params: { friendshipId, friendId },
     });
+  };
+
+  const getDisplayMessages = () => {
+    return activeTab === 'all' ? messages : starterMessages;
   };
 
   if (loading) {
@@ -252,15 +318,70 @@ export function ChatScreen({
         </TouchableOpacity>
       </View>
 
+      {/* Tab Switcher */}
+      <View style={[styles.tabContainer, { backgroundColor: colors.backgroundSecondary }]}>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeTab === 'all' && styles.activeTab,
+            activeTab === 'all' && { backgroundColor: colors.primary }
+          ]}
+          onPress={() => setActiveTab('all')}
+        >
+          <Text style={[
+            styles.tabText,
+            { color: activeTab === 'all' ? '#fff' : colors.textSecondary }
+          ]}>
+            All Messages
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeTab === 'starters' && styles.activeTab,
+            activeTab === 'starters' && { backgroundColor: colors.primary }
+          ]}
+          onPress={() => setActiveTab('starters')}
+        >
+          <Ionicons 
+            name="sparkles" 
+            size={16} 
+            color={activeTab === 'starters' ? '#fff' : colors.textSecondary}
+            style={{ marginRight: 6 }}
+          />
+          <Text style={[
+            styles.tabText,
+            { color: activeTab === 'starters' ? '#fff' : colors.textSecondary }
+          ]}>
+            Starters ({starterMessages.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Messages */}
       <FlatList
         ref={flatListRef}
-        data={messages}
+        data={getDisplayMessages()}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         inverted
         contentContainerStyle={styles.messagesList}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons 
+              name={activeTab === 'starters' ? 'sparkles-outline' : 'chatbubble-outline'} 
+              size={48} 
+              color={colors.textSecondary} 
+            />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              {activeTab === 'starters' 
+                ? 'No starter conversations yet' 
+                : 'Start a conversation'}
+            </Text>
+          </View>
+        }
       />
 
       {/* Input */}
@@ -280,12 +401,12 @@ export function ChatScreen({
             value={inputText}
             onChangeText={setInputText}
             multiline
-            onSubmitEditing={sendMessage}
+            onSubmitEditing={() => sendMessage()}
           />
 
           <TouchableOpacity
             style={[styles.sendButton, { opacity: inputText.trim() ? 1 : 0.5 }]}
-            onPress={sendMessage}
+            onPress={() => sendMessage()}
             disabled={!inputText.trim() || sending}
           >
             <Ionicons
@@ -311,7 +432,7 @@ export function ChatScreen({
         >
           <View style={[styles.overlayContent, { backgroundColor: colors.background }]}>
             <TouchableOpacity style={styles.overlayOption} onPress={handleStartConversation}>
-              <Ionicons name="chatbubble-outline" size={24} color={colors.primary} />
+              <Ionicons name="sparkles-outline" size={24} color={colors.primary} />
               <Text style={[styles.overlayText, { color: colors.text }]}>Start Conversation</Text>
             </TouchableOpacity>
 
@@ -377,6 +498,30 @@ const styles = StyleSheet.create({
   menuButton: {
     padding: 8,
   },
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  tab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  activeTab: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   messagesList: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -394,6 +539,21 @@ const styles = StyleSheet.create({
     maxWidth: '75%',
     padding: 12,
     borderRadius: 18,
+  },
+  starterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 6,
+    alignSelf: 'flex-start',
+  },
+  starterBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
   },
   messageText: {
     fontSize: 16,
@@ -424,6 +584,15 @@ const styles = StyleSheet.create({
   sendButton: {
     paddingBottom: 8,
     paddingLeft: 8,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  emptyText: {
+    marginTop: 12,
+    fontSize: 16,
   },
   overlayBackground: {
     flex: 1,
