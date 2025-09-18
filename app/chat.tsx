@@ -1,20 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useTheme } from '@/context/ThemeProvider';
+import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  SafeAreaView,
-  ActivityIndicator,
-  Image,
+  View
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/lib/supabase';
-import { useTheme } from '@/context/ThemeProvider';
 
 interface Message {
   id: string;
@@ -47,7 +49,9 @@ export function ChatScreen({
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
+  const [showOverlay, setShowOverlay] = useState(false); // 👈 overlay state
+  const flatListRef = useRef<FlatList>(null);  
+  const router = useRouter();
 
   useEffect(() => {
     initializeChat();
@@ -196,6 +200,25 @@ export function ChatScreen({
     );
   };
 
+  const handleOpenOverlay = () => setShowOverlay(true);
+  const handleCloseOverlay = () => setShowOverlay(false);
+
+  const handleStartConversation = () => {
+    setShowOverlay(false);
+    router.push({
+      pathname: "/StartConversation",
+      params: { friendshipId, friendId },
+    });
+  };
+
+  const handleCreateMoment = () => {
+    setShowOverlay(false);
+    router.push({
+      pathname: "/FriendsView",
+      params: { friendshipId, friendId },
+    });
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -206,33 +229,30 @@ export function ChatScreen({
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        
+
         <View style={styles.headerInfo}>
           {friendAvatar ? (
             <Image source={{ uri: friendAvatar }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-              <Text style={styles.avatarText}>
-                {friendName.charAt(0).toUpperCase()}
-              </Text>
+              <Text style={styles.avatarText}>{friendName.charAt(0).toUpperCase()}</Text>
             </View>
           )}
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
-            {friendName}
-          </Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{friendName}</Text>
         </View>
-        
+
         <TouchableOpacity style={styles.menuButton}>
           <Ionicons name="ellipsis-vertical" size={24} color={colors.text} />
         </TouchableOpacity>
       </View>
 
-      {/* Messages List */}
+      {/* Messages */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -243,16 +263,16 @@ export function ChatScreen({
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Input Area */}
+      {/* Input */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <View style={[styles.inputContainer, { backgroundColor: colors.background }]}>
-          <TouchableOpacity style={styles.attachButton}>
+          <TouchableOpacity style={styles.attachButton} onPress={handleOpenOverlay}>
             <Ionicons name="add-circle-outline" size={28} color={colors.primary} />
           </TouchableOpacity>
-          
+
           <TextInput
             style={[styles.textInput, { color: colors.text }]}
             placeholder="Type a message..."
@@ -262,12 +282,9 @@ export function ChatScreen({
             multiline
             onSubmitEditing={sendMessage}
           />
-          
+
           <TouchableOpacity
-            style={[
-              styles.sendButton,
-              { opacity: inputText.trim() ? 1 : 0.5 },
-            ]}
+            style={[styles.sendButton, { opacity: inputText.trim() ? 1 : 0.5 }]}
             onPress={sendMessage}
             disabled={!inputText.trim() || sending}
           >
@@ -279,6 +296,32 @@ export function ChatScreen({
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Overlay */}
+      <Modal
+        visible={showOverlay}
+        animationType="fade"
+        transparent
+        onRequestClose={handleCloseOverlay}
+      >
+        <TouchableOpacity
+          style={styles.overlayBackground}
+          activeOpacity={1}
+          onPress={handleCloseOverlay}
+        >
+          <View style={[styles.overlayContent, { backgroundColor: colors.background }]}>
+            <TouchableOpacity style={styles.overlayOption} onPress={handleStartConversation}>
+              <Ionicons name="chatbubble-outline" size={24} color={colors.primary} />
+              <Text style={[styles.overlayText, { color: colors.text }]}>Start Conversation</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.overlayOption} onPress={handleCreateMoment}>
+              <Ionicons name="images-outline" size={24} color={colors.primary} />
+              <Text style={[styles.overlayText, { color: colors.text }]}>Share a Moment</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -381,5 +424,24 @@ const styles = StyleSheet.create({
   sendButton: {
     paddingBottom: 8,
     paddingLeft: 8,
+  },
+  overlayBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  overlayContent: {
+    padding: 20,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  overlayOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  overlayText: {
+    fontSize: 16,
+    marginLeft: 12,
   },
 });

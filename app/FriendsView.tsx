@@ -1,16 +1,17 @@
+// app/friends/FriendsView.tsx
 import { FriendsCarousel } from "@/components/FriendsCarousel";
-import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
+import { useTheme } from "@/context/ThemeProvider";
 import { supabase } from "@/lib/supabase";
 import { Friend } from "@/types";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { StatusBar, StyleSheet, View } from "react-native";
-import { ChatScreen } from "./chat"; // using your existing file
 
-function MainApp() {
+export default function FriendsView() {
   const { colors } = useTheme();
   const [friends, setFriends] = useState<Friend[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
-  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchFriends = async () => {
@@ -70,17 +71,20 @@ function MainApp() {
     fetchFriends();
   }, []);
 
-  if (selectedFriend) {
-    return (
-      <ChatScreen
-        friendshipId={selectedFriend.friendshipId}
-        friendId={selectedFriend.profileId}
-        friendName={selectedFriend.name}
-        friendAvatar={selectedFriend.avatar}
-        onBack={() => setSelectedFriend(null)}
-      />
-    );
-  }
+  const handleFriendSelect = (friendId: string) => {
+    const friend = friends.find((f) => f.profileId === friendId);
+    if (friend) {
+      router.push({
+        pathname: "/chat",
+        params: {
+          friendshipId: friend.friendshipId,
+          friendId: friend.profileId,
+          friendName: friend.name,
+          friendAvatar: friend.avatar,
+        },
+      });
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -88,20 +92,9 @@ function MainApp() {
       <FriendsCarousel
         friends={friends}
         selectedFriendId={""}
-        onFriendSelect={(friendId) => {
-          const friend = friends.find((f) => f.profileId === friendId);
-          if (friend) setSelectedFriend(friend);
-        }}
+        onFriendSelect={handleFriendSelect}
       />
     </View>
-  );
-}
-
-export default function App() {
-  return (
-    <ThemeProvider>
-      <MainApp />
-    </ThemeProvider>
   );
 }
 

@@ -1,7 +1,7 @@
-import React from 'react';
-import { Image, ScrollView, StyleSheet, TouchableOpacity, View, Text} from 'react-native';
-import { useTheme } from '../context/ThemeProvider';
 import { router } from "expo-router";
+import React from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useTheme } from '../context/ThemeProvider';
 import { Friend } from '../types';
 
 interface FriendsCarouselProps {
@@ -19,21 +19,23 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
 
   return (
     <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
+      showsVerticalScrollIndicator={false}
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
     >
+      {/* Add Friend Button */}
       <TouchableOpacity
         style={styles.friendItem}
         onPress={() => router.push("/friend-requests")}
-        activeOpacity={0.8}
+        activeOpacity={0.9}
       >
-        <View style={[styles.avatar, styles.manageButtonInner]}>
+        <View style={[styles.avatarLarge, styles.manageButtonInner]}>
           <Text style={styles.manageButtonText}>+</Text>
         </View>
+        <Text style={[styles.friendName, { color: colors.text }]}>Add</Text>
       </TouchableOpacity>
 
+      {/* Friend Avatars */}
       {friends.map((friend) => {
         const isSelected = friend.profileId === selectedFriendId;
         return (
@@ -41,12 +43,12 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
             key={friend.friendshipId}
             style={styles.friendItem}
             onPress={() => onFriendSelect(friend.profileId)}
-            activeOpacity={0.8}
+            activeOpacity={0.9}
           >
             <View style={styles.avatarContainer}>
               <View
                 style={[
-                  styles.avatar,
+                  styles.avatarLarge,
                   {
                     borderColor: isSelected ? colors.activeGreen : "transparent",
                   },
@@ -87,6 +89,9 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
                 />
               )}
             </View>
+            <Text style={[styles.friendName, { color: colors.text }]}>
+              {friend.name}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -94,83 +99,71 @@ export const FriendsCarousel: React.FC<FriendsCarouselProps> = ({
   );
 };
 
-
 const styles = StyleSheet.create({
   container: {
-    height: 90,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    marginBottom: 16,
+    height: 200, // taller to fit names and big avatars
+    paddingVertical: 20,
   },
   contentContainer: {
-    gap: 16,
+    alignItems: "center",
+    paddingHorizontal: 20,
+    gap: 24, // more spacing between items
   },
-  manageButtonInner: {
-    backgroundColor: "#ccc",
+  friendItem: {
+    width: 120, // bigger tiles
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  avatarContainer: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarLarge: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
   },
-
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 50,
+    backgroundColor: "transparent",
+  },
+  avatarPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  dimOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.3)",
+  },
+  friendName: {
+    marginTop: 8,
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  manageButtonInner: {
+    backgroundColor: "#ccc",
+  },
   manageButtonText: {
-    fontSize: 24,
+    fontSize: 40,
     color: "#333",
     fontWeight: "bold",
   },
-  avatarContainer: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 70, // matches friendItem width
-  },
-
-  friendItem: {
-    width: 70,
-    height: 70, // ensures touchable is the full avatar
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 2,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 30,
-    backgroundColor: 'transparent',
-  },
-
-  dimOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)', // dim effect instead of opacity on container
-  },
-
-  avatarPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  grayscale: {
-    // Note: React Native doesn't support CSS filters like grayscale
-    // This would need a library like react-native-color-matrix-image-filters
-    // For now, we'll rely on opacity for the inactive state
-  },
-  
   onlineIndicator: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     borderWidth: 2,
   },
 });
