@@ -2,7 +2,7 @@ import { useTheme } from '@/context/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -27,7 +27,7 @@ interface Message {
   content: string;
   created_at: string;
   is_read: boolean;
-  starter_id?: string; // Add starter_id to track starter-initiated messages
+  starter_id?: string;
   moment_id?: string;
 }
 
@@ -35,9 +35,8 @@ interface SharedMoment {
   id: string;
   title: string;
   reflection: string;
-  storage_path: string; // could be CSV of image URIs
+  storage_path: string; // CSV of signed URLs after processing
 }
-
 
 interface ChatScreenProps {
   friendshipId: string;
@@ -67,8 +66,83 @@ export function ChatScreen({
   const [showOverlay, setShowOverlay] = useState(false);
   const [startersMap, setStartersMap] = useState<Record<string, string>>({});
   const [momentsMap, setMomentsMap] = useState<Record<string, SharedMoment>>({});
+  
+  // Use useRef for cache to prevent re-renders
+  const signedUrlCache = useRef<Record<string, { url: string; timestamp: number }>>({});
+  const processingMoments = useRef<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);  
   const router = useRouter();
+
+  // Memoize the signed moment function to prevent recreation
+  const getSignedMoment = useCallback(async (moment: any): Promise<SharedMoment> => {
+    // Prevent duplicate processing
+    if (processingMoments.current.has(moment.id)) {
+      return moment; // Return original moment if already processing
+    }
+    
+    processingMoments.current.add(moment.id);
+    
+    try {
+      const paths = moment.storage_path.includes(",")
+        ? moment.storage_path.split(",")
+        : [moment.storage_path];
+
+      const signedUrls: string[] = [];
+      const now = Date.now();
+      const cacheExpiry = 3000000; // 50 minutes (less than the 1 hour expiry)
+
+      for (const path of paths) {
+        const cached = signedUrlCache.current[path];
+        
+        // Use cached URL if it exists and hasn't expired
+        if (cached && (now - cached.timestamp) < cacheExpiry) {
+          signedUrls.push(cached.url);
+        } else {
+          const { data: urlData, error } = await supabase.storage
+            .from("shared-photos")
+            .createSignedUrl(path.replace("shared-photos/", ""), 3600);
+
+          if (!error && urlData?.signedUrl) {
+            signedUrlCache.current[path] = {
+              url: urlData.signedUrl,
+              timestamp: now
+            };
+            signedUrls.push(urlData.signedUrl);
+          } else {
+            // If we can't get a new signed URL, use the cached one if available
+            if (cached) {
+              signedUrls.push(cached.url);
+            }
+          }
+        }
+      }
+
+      return {
+        ...moment,
+        storage_path: signedUrls.join(","),
+      };
+    } finally {
+      processingMoments.current.delete(moment.id);
+    }
+  }, []);
+
+  // Memoize moment processing to prevent unnecessary updates
+  const processMomentsData = useCallback(async (momentsData: any[]) => {
+    const newMomentsMap: Record<string, SharedMoment> = {};
+    
+    for (const m of momentsData) {
+      // Only process if not already in map
+      if (!momentsMap[m.id]) {
+        const signedMoment = await getSignedMoment(m);
+        newMomentsMap[signedMoment.id] = signedMoment;
+      } else {
+        // Keep existing moment to prevent flicker
+        newMomentsMap[m.id] = momentsMap[m.id];
+      }
+    }
+    
+    return newMomentsMap;
+  }, [momentsMap, getSignedMoment]);
 
   useEffect(() => {
     initializeChat();
@@ -86,7 +160,7 @@ export function ChatScreen({
         async (payload) => {
           const newMessage = payload.new as Message;
 
-          // Starter colors
+          // Handle starter colors
           if (newMessage.starter_id && !startersMap[newMessage.starter_id]) {
             const { data: starterData } = await supabase
               .from('starters')
@@ -99,7 +173,7 @@ export function ChatScreen({
             }
           }
 
-          // Moment data
+          // Handle moment data - only if not already processed
           if (newMessage.moment_id && !momentsMap[newMessage.moment_id]) {
             const { data: momentData } = await supabase
               .from('shared_photos')
@@ -108,19 +182,20 @@ export function ChatScreen({
               .single();
 
             if (momentData) {
-              setMomentsMap(prev => ({ ...prev, [momentData.id]: momentData }));
+              const signedMoment = await getSignedMoment(momentData);
+              setMomentsMap(prev => ({ ...prev, [signedMoment.id]: signedMoment }));
             }
           }
 
           // Add message to state
           setMessages(prev => [newMessage, ...prev]);
 
-          // Starter messages
+          // Add to starter messages if applicable
           if (newMessage.starter_id) {
             setStarterMessages(prev => [newMessage, ...prev]);
           }
 
-          // Mark as read
+          // Mark as read if from friend
           if (newMessage.sender_id === friendId) {
             markMessageAsRead(newMessage.id);
           }
@@ -131,8 +206,7 @@ export function ChatScreen({
     return () => {
       subscription.unsubscribe();
     };
-  }, [friendshipId, friendId, startersMap, momentsMap]);
-
+  }, [friendshipId, friendId, startersMap, momentsMap, getSignedMoment]);
 
   const initializeChat = async () => {
     try {
@@ -157,7 +231,7 @@ export function ChatScreen({
       setMessages(messagesData || []);
       setStarterMessages(messagesData?.filter(m => m.starter_id) || []);
 
-      // Starter colors
+      // Handle starter colors
       const starterIds = messagesData?.map(m => m.starter_id).filter(Boolean) || [];
       if (starterIds.length > 0) {
         const { data: startersData } = await supabase
@@ -165,14 +239,14 @@ export function ChatScreen({
           .select('id, colour')
           .in('id', starterIds);
 
-        const map: Record<string, string> = {};
+        const startersMapData: Record<string, string> = {};
         startersData?.forEach(s => {
-          map[s.id] = s.colour;
+          startersMapData[s.id] = s.colour;
         });
-        setStartersMap(map);
+        setStartersMap(startersMapData);
       }
 
-      // Fetch moment data
+      // Fetch and process moment data
       const momentIds = messagesData?.map(m => m.moment_id).filter(Boolean) as string[] || [];
       if (momentIds.length > 0) {
         const { data: momentsData } = await supabase
@@ -180,11 +254,10 @@ export function ChatScreen({
           .select('*')
           .in('id', momentIds);
 
-        const map: Record<string, SharedMoment> = {};
-        momentsData?.forEach(m => {
-          map[m.id] = m;
-        });
-        setMomentsMap(map);
+        if (momentsData && momentsData.length > 0) {
+          const processedMoments = await processMomentsData(momentsData);
+          setMomentsMap(processedMoments);
+        }
       }
 
       // Mark unread messages as read
@@ -201,8 +274,6 @@ export function ChatScreen({
       setLoading(false);
     }
   };
-
-
 
   const markMessageAsRead = async (messageId: string) => {
     await supabase
@@ -226,7 +297,6 @@ export function ChatScreen({
         content: messageContent,
       };
 
-      // Add starter_id if provided
       if (starterId) {
         messageData.starter_id = starterId;
       }
@@ -235,7 +305,7 @@ export function ChatScreen({
 
       if (error) {
         console.error('Error sending message:', error);
-        setInputText(messageContent); // Restore input on error
+        setInputText(messageContent);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -245,15 +315,14 @@ export function ChatScreen({
     }
   };
 
- const renderMessage = ({ item }: { item: Message }) => {
+  // Memoize the message rendering to prevent unnecessary re-renders
+  const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isOwnMessage = item.sender_id === userId;
     const starterColor = item.starter_id ? startersMap[item.starter_id] : null;
 
-    // ✅ Render a moment message
+    // Render a moment message
     if (item.moment_id && momentsMap[item.moment_id]) {
       const moment = momentsMap[item.moment_id];
-
-      // Split storage_path into an array of image URIs
       const images = moment.storage_path.includes(',')
         ? moment.storage_path.split(',')
         : [moment.storage_path];
@@ -261,6 +330,7 @@ export function ChatScreen({
       return (
         <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
           <MomentCard
+            key={`moment-${item.moment_id}`} // Add stable key
             title={moment.title}
             reflection={moment.reflection}
             images={images}
@@ -269,7 +339,7 @@ export function ChatScreen({
       );
     }
 
-    // ✅ Regular or starter message
+    // Regular or starter message
     return (
       <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
         <View
@@ -293,10 +363,7 @@ export function ChatScreen({
         </View>
       </View>
     );
-  };
-
-
-
+  }, [userId, startersMap, momentsMap, activeTab, colors]);
 
   const handleOpenOverlay = () => setShowOverlay(true);
   const handleCloseOverlay = () => setShowOverlay(false);
@@ -309,7 +376,7 @@ export function ChatScreen({
         friendshipId, 
         friendId,
         friendName,
-        returnToChat: 'true' // Flag to return to chat after selection
+        returnToChat: 'true'
       },
     });
   };
@@ -322,9 +389,9 @@ export function ChatScreen({
     });
   };
 
-  const getDisplayMessages = () => {
+  const getDisplayMessages = useCallback(() => {
     return activeTab === 'all' ? messages : starterMessages;
-  };
+  }, [activeTab, messages, starterMessages]);
 
   if (loading) {
     return (
@@ -336,7 +403,6 @@ export function ChatScreen({
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -409,6 +475,9 @@ export function ChatScreen({
         inverted
         contentContainerStyle={styles.messagesList}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true} // Optimize performance
+        maxToRenderPerBatch={10} // Limit renders per batch
+        windowSize={10} // Reduce memory usage
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons 

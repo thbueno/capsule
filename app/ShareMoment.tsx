@@ -1,5 +1,6 @@
 import { decode } from "base64-arraybuffer";
 import * as ImagePicker from "expo-image-picker";
+import { useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -28,11 +29,15 @@ interface ImageAsset {
   type?: "image" | "video" | "livePhoto" | "pairedVideo";
 }
 
+
+
 export const ShareMoment: React.FC<ShareMomentProps> = ({
-  friendId,
-  friendshipId,
   onShared,
 }) => {
+  const params = useLocalSearchParams();
+  const friendshipId = params.friendshipId as string;
+  const friendId = params.friendId as string;
+
   const { colors } = useTheme();
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
