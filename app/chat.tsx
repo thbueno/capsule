@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { MomentCard } from "../components/MomentCard";
 
 interface Message {
   id: string;
@@ -27,7 +28,16 @@ interface Message {
   created_at: string;
   is_read: boolean;
   starter_id?: string; // Add starter_id to track starter-initiated messages
+  moment_id?: string;
 }
+
+interface SharedMoment {
+  id: string;
+  title: string;
+  reflection: string;
+  storage_path: string; // could be CSV of image URIs
+}
+
 
 interface ChatScreenProps {
   friendshipId: string;
@@ -56,6 +66,7 @@ export function ChatScreen({
   const [sending, setSending] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [startersMap, setStartersMap] = useState<Record<string, string>>({});
+  const [momentsMap, setMomentsMap] = useState<Record<string, SharedMoment>>({});
   const flatListRef = useRef<FlatList>(null);  
   const router = useRouter();
 
@@ -75,7 +86,7 @@ export function ChatScreen({
         async (payload) => {
           const newMessage = payload.new as Message;
 
-          // If message has starter_id and color not in map, fetch it
+          // Starter colors
           if (newMessage.starter_id && !startersMap[newMessage.starter_id]) {
             const { data: starterData } = await supabase
               .from('starters')
@@ -84,22 +95,32 @@ export function ChatScreen({
               .single();
 
             if (starterData) {
-              setStartersMap((prev) => ({
-                ...prev,
-                [starterData.id]: starterData.colour,
-              }));
+              setStartersMap(prev => ({ ...prev, [starterData.id]: starterData.colour }));
+            }
+          }
+
+          // Moment data
+          if (newMessage.moment_id && !momentsMap[newMessage.moment_id]) {
+            const { data: momentData } = await supabase
+              .from('shared_photos')
+              .select('*')
+              .eq('id', newMessage.moment_id)
+              .single();
+
+            if (momentData) {
+              setMomentsMap(prev => ({ ...prev, [momentData.id]: momentData }));
             }
           }
 
           // Add message to state
-          setMessages((prev) => [newMessage, ...prev]);
+          setMessages(prev => [newMessage, ...prev]);
 
-          // Add to starter messages if it has a starter_id
+          // Starter messages
           if (newMessage.starter_id) {
-            setStarterMessages((prev) => [newMessage, ...prev]);
+            setStarterMessages(prev => [newMessage, ...prev]);
           }
 
-          // Mark as read if it's from the friend
+          // Mark as read
           if (newMessage.sender_id === friendId) {
             markMessageAsRead(newMessage.id);
           }
@@ -110,7 +131,8 @@ export function ChatScreen({
     return () => {
       subscription.unsubscribe();
     };
-  }, [friendshipId, friendId, startersMap]);
+  }, [friendshipId, friendId, startersMap, momentsMap]);
+
 
   const initializeChat = async () => {
     try {
@@ -119,7 +141,7 @@ export function ChatScreen({
       if (!uid) return;
       setUserId(uid);
 
-      // Fetch all messages
+      // Fetch messages
       const { data: messagesData, error } = await supabase
         .from('messages')
         .select('*')
@@ -135,7 +157,7 @@ export function ChatScreen({
       setMessages(messagesData || []);
       setStarterMessages(messagesData?.filter(m => m.starter_id) || []);
 
-      // Fetch all starter colors
+      // Starter colors
       const starterIds = messagesData?.map(m => m.starter_id).filter(Boolean) || [];
       if (starterIds.length > 0) {
         const { data: startersData } = await supabase
@@ -144,10 +166,25 @@ export function ChatScreen({
           .in('id', starterIds);
 
         const map: Record<string, string> = {};
-        startersData?.forEach((s) => {
+        startersData?.forEach(s => {
           map[s.id] = s.colour;
         });
         setStartersMap(map);
+      }
+
+      // Fetch moment data
+      const momentIds = messagesData?.map(m => m.moment_id).filter(Boolean) as string[] || [];
+      if (momentIds.length > 0) {
+        const { data: momentsData } = await supabase
+          .from('shared_photos')
+          .select('*')
+          .in('id', momentIds);
+
+        const map: Record<string, SharedMoment> = {};
+        momentsData?.forEach(m => {
+          map[m.id] = m;
+        });
+        setMomentsMap(map);
       }
 
       // Mark unread messages as read
@@ -164,6 +201,7 @@ export function ChatScreen({
       setLoading(false);
     }
   };
+
 
 
   const markMessageAsRead = async (messageId: string) => {
@@ -207,23 +245,37 @@ export function ChatScreen({
     }
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+ const renderMessage = ({ item }: { item: Message }) => {
     const isOwnMessage = item.sender_id === userId;
     const starterColor = item.starter_id ? startersMap[item.starter_id] : null;
 
+    // ✅ Render a moment message
+    if (item.moment_id && momentsMap[item.moment_id]) {
+      const moment = momentsMap[item.moment_id];
+
+      // Split storage_path into an array of image URIs
+      const images = moment.storage_path.includes(',')
+        ? moment.storage_path.split(',')
+        : [moment.storage_path];
+
+      return (
+        <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
+          <MomentCard
+            title={moment.title}
+            reflection={moment.reflection}
+            images={images}
+          />
+        </View>
+      );
+    }
+
+    // ✅ Regular or starter message
     return (
-      <View
-        style={[
-          styles.messageContainer,
-          isOwnMessage ? styles.ownMessage : styles.otherMessage,
-        ]}
-      >
+      <View style={[styles.messageContainer, isOwnMessage ? styles.ownMessage : styles.otherMessage]}>
         <View
           style={[
             styles.messageBubble,
-            {
-              backgroundColor: starterColor || (isOwnMessage ? colors.primary : colors.backgroundSecondary),
-            },
+            { backgroundColor: starterColor || (isOwnMessage ? colors.primary : colors.backgroundSecondary) },
           ]}
         >
           {item.starter_id && activeTab === 'all' && (
@@ -232,29 +284,18 @@ export function ChatScreen({
               <Text style={styles.starterBadgeText}>Starter</Text>
             </View>
           )}
-          <Text
-            style={[
-              styles.messageText,
-              { color: isOwnMessage ? '#FFFFFF' : colors.text },
-            ]}
-          >
+          <Text style={[styles.messageText, { color: isOwnMessage ? '#fff' : colors.text }]}>
             {item.content}
           </Text>
-          <Text
-            style={[
-              styles.messageTime,
-              { color: isOwnMessage ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
-            ]}
-          >
-            {new Date(item.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
+          <Text style={[styles.messageTime, { color: isOwnMessage ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]}>
+            {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
       </View>
     );
   };
+
+
 
 
   const handleOpenOverlay = () => setShowOverlay(true);
@@ -276,7 +317,7 @@ export function ChatScreen({
   const handleCreateMoment = () => {
     setShowOverlay(false);
     router.push({
-      pathname: "/FriendsView",
+      pathname: "/ShareMoment",
       params: { friendshipId, friendId },
     });
   };
