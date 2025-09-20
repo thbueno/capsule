@@ -1,11 +1,13 @@
 import { ThemeProvider } from "@/context/ThemeProvider"; // adjust path
-import { Stack } from "expo-router";
+import { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { router, Stack, usePathname } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { supabase } from "../lib/supabase";
 
 export default function Layout() {
   const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
 
   useEffect(() => {
     let mounted = true;
@@ -13,18 +15,81 @@ export default function Layout() {
     const handleAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        
         if (!mounted) return;
 
-        // handle redirect logic (same as your code)...
+        const isPublicRoute = ["/login", "/signup"].includes(pathname);
+        
+        // Not logged in - redirect to login (unless already there)
+        if (!session) {
+          if (!isPublicRoute) {
+            router.replace("/login");
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Logged in on public route - check profile and redirect
+        if (isPublicRoute) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", session.user.id)
+            .maybeSingle();
+
+          if (!mounted) return;
+
+          if (profile) {
+            router.replace("/");
+          } else {
+            router.replace("/create-profile");
+          }
+          return;
+        }
+
+        // Logged in on protected route - just stop loading
+        setLoading(false);
+
       } catch (error) {
         console.error("Auth error:", error);
-      } finally {
         if (mounted) setLoading(false);
       }
     };
 
     handleAuth();
-  }, []);
+
+    // Listen for auth changes
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    async (event: AuthChangeEvent, session: Session | null) => {
+      if (!mounted) return;
+
+      if (event === 'SIGNED_OUT') {
+        router.replace("/login");
+        return;
+      }
+
+      if (event === 'SIGNED_IN' && session) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (!mounted) return;
+
+        if (profile) {
+          router.replace("/");
+        } else {
+          router.replace("/create-profile");
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [pathname]);
 
   if (loading) {
     return (
