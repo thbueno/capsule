@@ -88,17 +88,52 @@ export default function StartConversation() {
     }
 
     try {
-      // Send the starter message to the chat
-      const { error } = await supabase.from('messages').insert({
+      // First, check if a thread already exists for this starter
+      const { data: existingThread } = await supabase
+        .from('starter_threads')
+        .select('id')
+        .eq('starter_id', starter.id)
+        .eq('friendships_id', friendshipId as string)
+        .single();
+
+      let threadId: string;
+
+      if (existingThread) {
+        // Use existing thread
+        threadId = existingThread.id;
+      } else {
+        // Create a new thread for this starter
+        const { data: newThread, error: threadError } = await supabase
+          .from('starter_threads')
+          .insert({
+            starter_id: starter.id,
+            friendships_id: friendshipId as string,
+            last_message_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (threadError) {
+          console.error('Error creating thread:', threadError);
+          Alert.alert("Error", "Failed to create conversation thread");
+          return;
+        }
+
+        threadId = newThread.id;
+      }
+
+      // Send the starter message to the thread
+      const { error: messageError } = await supabase.from('messages').insert({
         sender_id: userId,
         recipient_id: friendId as string,
         friendships_id: friendshipId as string,
         content: starter.text,
-        starter_id: starter.id, // Track that this is a starter message
+        starter_id: starter.id,
+        thread_id: threadId, // Associate with the thread
       });
 
-      if (error) {
-        console.error('Error sending starter:', error);
+      if (messageError) {
+        console.error('Error sending starter:', messageError);
         Alert.alert("Error", "Failed to send starter message");
         return;
       }
@@ -107,7 +142,8 @@ export default function StartConversation() {
       if (returnToChat === 'true') {
         router.back();
       } else {
-        Alert.alert("Success", "Starter sent to chat!");
+        Alert.alert("Success", "Conversation started!");
+        router.back();
       }
     } catch (err) {
       console.error('Error handling starter selection:', err);
@@ -165,7 +201,7 @@ export default function StartConversation() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>
-          Choose a Starter
+          Start a Thread
         </Text>
         <View style={{ width: 40 }} />
       </View>
@@ -174,10 +210,18 @@ export default function StartConversation() {
       {friendName && (
         <View style={styles.friendInfo}>
           <Text style={[styles.friendText, { color: colors.textSecondary }]}>
-            Sending to: {friendName}
+            Starting conversation with: {friendName}
           </Text>
         </View>
       )}
+
+      {/* Info message */}
+      <View style={[styles.infoBox, { backgroundColor: colors.backgroundSecondary }]}>
+        <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
+        <Text style={[styles.infoText, { color: colors.text }]}>
+          Each starter creates its own conversation thread that you can return to anytime
+        </Text>
+      </View>
 
       {/* Filter Pills */}
       {renderFilterPills()}
@@ -236,6 +280,20 @@ const styles = StyleSheet.create({
   },
   friendText: {
     fontSize: 14,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 12,
+  },
+  infoText: {
+    fontSize: 13,
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 18,
   },
   filterRow: {
     flexDirection: "row",
