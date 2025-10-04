@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   SafeAreaView,
@@ -41,16 +42,35 @@ export default function StartConversation() {
   const [starters, setStarters] = useState<Starter[]>([]);
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     getUserId();
-    fetchStarters(activeFilter);
-  }, [activeFilter]);
+  }, []);
+
+  useEffect(() => {
+    if (userId) {
+      fetchStarters(activeFilter);
+    }
+  }, [activeFilter, userId]);
 
   const getUserId = async () => {
-    const { data: authData } = await supabase.auth.getUser();
-    if (authData?.user?.id) {
-      setUserId(authData.user.id);
+    try {
+      const { data: authData, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error("Auth error:", error);
+        Alert.alert("Error", "Failed to authenticate user");
+        return;
+      }
+      if (authData?.user?.id) {
+        setUserId(authData.user.id);
+      } else {
+        Alert.alert("Error", "No authenticated user found");
+        router.back();
+      }
+    } catch (err) {
+      console.error("Error getting user:", err);
+      Alert.alert("Error", "Failed to authenticate");
     }
   };
 
@@ -67,6 +87,7 @@ export default function StartConversation() {
 
       if (error) {
         console.error("Error fetching starters:", error);
+        Alert.alert("Error", "Failed to load conversation starters");
         return;
       }
 
@@ -76,6 +97,7 @@ export default function StartConversation() {
       }
     } catch (err) {
       console.error("Error fetching starters:", err);
+      Alert.alert("Error", "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -87,20 +109,45 @@ export default function StartConversation() {
       return;
     }
 
+    if (creating) return; // Prevent double-tap
+
+    setCreating(true);
     try {
       // First, check if a thread already exists for this starter
-      const { data: existingThread } = await supabase
+      const { data: existingThreads, error: threadCheckError } = await supabase
         .from('starter_threads')
         .select('id')
         .eq('starter_id', starter.id)
-        .eq('friendships_id', friendshipId as string)
-        .single();
+        .eq('friendships_id', friendshipId as string);
+
+      if (threadCheckError) {
+        console.error('Error checking existing thread:', threadCheckError);
+        throw new Error('Failed to check existing conversations');
+      }
+
+      const existingThread = existingThreads && existingThreads.length > 0 ? existingThreads[0] : null;
+
+      if (threadCheckError) {
+        console.error('Error checking existing thread:', threadCheckError);
+        throw new Error('Failed to check existing conversations');
+      }
 
       let threadId: string;
 
       if (existingThread) {
         // Use existing thread
         threadId = existingThread.id;
+        
+        // Update the last_message_at timestamp
+        const { error: updateError } = await supabase
+          .from('starter_threads')
+          .update({ last_message_at: new Date().toISOString() })
+          .eq('id', threadId);
+
+        if (updateError) {
+          console.error('Error updating thread:', updateError);
+          // Don't throw - this is not critical
+        }
       } else {
         // Create a new thread for this starter
         const { data: newThread, error: threadError } = await supabase
@@ -115,8 +162,7 @@ export default function StartConversation() {
 
         if (threadError) {
           console.error('Error creating thread:', threadError);
-          Alert.alert("Error", "Failed to create conversation thread");
-          return;
+          throw new Error('Failed to create conversation thread');
         }
 
         threadId = newThread.id;
@@ -129,25 +175,35 @@ export default function StartConversation() {
         friendships_id: friendshipId as string,
         content: starter.text,
         starter_id: starter.id,
-        thread_id: threadId, // Associate with the thread
+        thread_id: threadId,
+        is_read: false
       });
 
       if (messageError) {
         console.error('Error sending starter:', messageError);
-        Alert.alert("Error", "Failed to send starter message");
-        return;
+        throw new Error('Failed to send starter message');
       }
 
-      // Navigate back to chat if returnToChat flag is set
+      // Navigate back to chat
       if (returnToChat === 'true') {
         router.back();
       } else {
-        Alert.alert("Success", "Conversation started!");
-        router.back();
+        router.replace({
+          pathname: "/chat",
+          params: { 
+            friendshipId, 
+            friendId, 
+            friendName,
+            activeThread: threadId 
+          }
+        });
       }
     } catch (err) {
       console.error('Error handling starter selection:', err);
-      Alert.alert("Error", "Something went wrong");
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      Alert.alert("Error", message);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -176,10 +232,12 @@ export default function StartConversation() {
               onPress={() => setActiveFilter(f.key)}
             >
               <Text
-                style={{
-                  color: isActive ? "#fff" : starterColor,
-                  fontWeight: "600",
-                }}
+                style={[
+                  styles.pillText,
+                  {
+                    color: isActive ? "#fff" : starterColor,
+                  }
+                ]}
               >
                 {f.label}
               </Text>
@@ -189,6 +247,17 @@ export default function StartConversation() {
       </View>
     );
   };
+
+  if (!userId) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Loading...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -227,28 +296,53 @@ export default function StartConversation() {
       {renderFilterPills()}
 
       {/* Starters Grid */}
-      <FlatList
-        data={starters}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
-        columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.listContent}
-        refreshing={loading}
-        onRefresh={() => fetchStarters(activeFilter)}
-        renderItem={({ item }) => (
-          <TouchableOpacity 
-            style={styles.cardWrapper}
-            onPress={() => handleStarterSelect(item)}
-          >
-            <StarterCard
-              key={`starter-${item.id}`}
-              text={item.text}
-              backgroundColor={item.colour}
-              onResponse={() => handleStarterSelect(item)}
-            />
-          </TouchableOpacity>
-        )}
-      />
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={starters}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          columnWrapperStyle={styles.row}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <TouchableOpacity 
+              style={styles.cardWrapper}
+              onPress={() => handleStarterSelect(item)}
+              disabled={creating}
+            >
+              <StarterCard
+                key={`starter-${item.id}`}
+                text={item.text}
+                backgroundColor={item.colour}
+                onResponse={() => handleStarterSelect(item)}
+              />
+              {creating && (
+                <View style={styles.creatingOverlay}>
+                  <ActivityIndicator size="small" color="#fff" />
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="chatbubble-outline" size={48} color={colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                No starters available for this category
+              </Text>
+              <TouchableOpacity 
+                style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                onPress={() => fetchStarters(activeFilter)}
+              >
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -257,29 +351,42 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(0,0,0,0.1)',
   },
   backButton: {
-    padding: 4,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '600',
+    textAlign: 'center',
   },
   friendInfo: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    alignItems: 'center',
   },
   friendText: {
     fontSize: 14,
+    textAlign: 'center',
   },
   infoBox: {
     flexDirection: 'row',
@@ -287,39 +394,74 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 8,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 8,
   },
   infoText: {
-    fontSize: 13,
-    marginLeft: 8,
     flex: 1,
-    lineHeight: 18,
+    fontSize: 14,
+    marginLeft: 8,
   },
   filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexWrap: 'wrap',
     gap: 8,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    marginBottom: 16,
   },
   pill: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    margin: 4,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  pillText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
+    padding: 16,
+    flexGrow: 1,
   },
   row: {
-    justifyContent: "space-between",
-    marginBottom: 16,
+    justifyContent: 'space-between',
   },
   cardWrapper: {
+    flex: 0.48,
+    marginBottom: 16,
+    position: 'relative',
+  },
+  creatingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  emptyContainer: {
     flex: 1,
-    marginHorizontal: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -2,7 +2,7 @@ import { useTheme } from '@/context/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -27,23 +27,19 @@ interface Message {
   content: string;
   created_at: string;
   is_read: boolean;
-  starter_id?: string;
   moment_id?: string;
-  thread_id?: string; // New field for thread association
+  capsule_id?: string;
 }
 
-interface StarterThread {
+interface Capsule {
   id: string;
-  starter_id: string;
   friendships_id: string;
+  title: string;
+  description?: string;
+  capsule_type: string;
+  created_by: string;
+  last_activity_at: string;
   created_at: string;
-  last_message_at: string;
-  starter?: {
-    id: string;
-    text: string;
-    colour: string;
-    category: string;
-  };
   message_count?: number;
   unread_count?: number;
 }
@@ -53,6 +49,9 @@ interface SharedMoment {
   title: string;
   reflection: string;
   storage_path: string;
+  created_at: string;
+  uploader_id: string;
+  capsule_id?: string;
 }
 
 interface ChatScreenProps {
@@ -63,41 +62,47 @@ interface ChatScreenProps {
   onBack: () => void;
 }
 
-type TabType = 'all' | 'starters' | 'thread';
+type TabType = 'all' | 'capsules' | 'moments' | 'capsule';
 
-export function ChatScreen({
-  friendshipId,
-  friendId,
-  friendName,
-  friendAvatar,
-  onBack,
-}: ChatScreenProps) {
-  const { colors } = useTheme();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [starterThreads, setStarterThreads] = useState<StarterThread[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('all');
-  const [activeThread, setActiveThread] = useState<StarterThread | null>(null);
-  const [threadMessages, setThreadMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
+const useAuth = () => {
   const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [startersMap, setStartersMap] = useState<Record<string, any>>({});
-  const [momentsMap, setMomentsMap] = useState<Record<string, SharedMoment>>({});
-  
-  const signedUrlCache = useRef<Record<string, { url: string; timestamp: number }>>({});
-  const processingMoments = useRef<Set<string>>(new Set());
-  const flatListRef = useRef<FlatList>(null);  
-  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(true);
 
+  useEffect(() => {
+    let mounted = true;
+    
+    const getUser = async () => {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        if (!mounted) return;
+        setUserId(authData?.user?.id || null);
+      } catch (err) {
+        console.error('Auth error:', err);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    getUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      setUserId(session?.user?.id || null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  return { userId, isLoading };
+};
+
+const useSignedUrls = () => {
+  const signedUrlCache = useRef<Record<string, { url: string; timestamp: number }>>({});
+  
   const getSignedMoment = useCallback(async (moment: any): Promise<SharedMoment> => {
-    if (processingMoments.current.has(moment.id)) {
-      return moment;
-    }
-    
-    processingMoments.current.add(moment.id);
-    
     try {
       const paths = moment.storage_path.includes(",")
         ? moment.storage_path.split(",")
@@ -105,7 +110,7 @@ export function ChatScreen({
 
       const signedUrls: string[] = [];
       const now = Date.now();
-      const cacheExpiry = 3000000;
+      const cacheExpiry = 50 * 60 * 1000;
 
       for (const path of paths) {
         const cached = signedUrlCache.current[path];
@@ -133,28 +138,134 @@ export function ChatScreen({
         ...moment,
         storage_path: signedUrls.join(","),
       };
-    } finally {
-      processingMoments.current.delete(moment.id);
+    } catch (err) {
+      console.error('Error getting signed URL:', err);
+      return moment;
     }
   }, []);
 
-  const processMomentsData = useCallback(async (momentsData: any[]) => {
-    const newMomentsMap: Record<string, SharedMoment> = {};
+  return { getSignedMoment };
+};
+
+export function ChatScreen({
+  friendshipId,
+  friendId,
+  friendName,
+  friendAvatar,
+  onBack,
+}: ChatScreenProps) {
+  const { colors } = useTheme();
+  const { userId, isLoading: authLoading } = useAuth();
+  const { getSignedMoment } = useSignedUrls();
+  
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [capsules, setCapsules] = useState<Capsule[]>([]);
+  const [moments, setMoments] = useState<SharedMoment[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [activeCapsule, setActiveCapsule] = useState<Capsule | null>(null);
+  const [capsuleMessages, setCapsuleMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
+  
+  const [momentsMap, setMomentsMap] = useState<Record<string, SharedMoment>>({});
+  
+  const flatListRef = useRef<FlatList>(null);  
+  const router = useRouter();
+
+  const initializeChat = useCallback(async () => {
+    if (!userId) return;
     
-    for (const m of momentsData) {
-      if (!momentsMap[m.id]) {
-        const signedMoment = await getSignedMoment(m);
-        newMomentsMap[signedMoment.id] = signedMoment;
-      } else {
-        newMomentsMap[m.id] = momentsMap[m.id];
+    setLoading(true);
+    
+    try {
+      const [messagesResult, capsulesResult, momentsResult] = await Promise.allSettled([
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('friendships_id', friendshipId)
+          .is('capsule_id', null)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        
+        supabase
+          .from('capsules')
+          .select('*')
+          .eq('friendships_id', friendshipId)
+          .order('last_activity_at', { ascending: false }),
+        
+        supabase
+          .from('shared_photos')
+          .select('*')
+          .or(`uploader_id.eq.${userId},shared_with_id.eq.${userId}`)
+          .order('created_at', { ascending: false })
+      ]);
+
+      const messagesData = messagesResult.status === 'fulfilled' ? messagesResult.value.data || [] : [];
+      const capsulesData = capsulesResult.status === 'fulfilled' ? capsulesResult.value.data || [] : [];
+      const momentsData = momentsResult.status === 'fulfilled' ? momentsResult.value.data || [] : [];
+      
+      setMessages(messagesData);
+
+      // Get counts for capsules
+      const capsulesWithCounts = await Promise.all(
+        capsulesData.map(async (capsule) => {
+          const [messageCountResult, unreadCountResult] = await Promise.allSettled([
+            supabase
+              .from('messages')
+              .select('*', { count: 'exact', head: true })
+              .eq('capsule_id', capsule.id),
+            supabase
+              .from('messages')
+              .select('*', { count: 'exact', head: true })
+              .eq('capsule_id', capsule.id)
+              .eq('recipient_id', userId)
+              .eq('is_read', false)
+          ]);
+
+          return {
+            ...capsule,
+            message_count: messageCountResult.status === 'fulfilled' ? messageCountResult.value.count || 0 : 0,
+            unread_count: unreadCountResult.status === 'fulfilled' ? unreadCountResult.value.count || 0 : 0
+          };
+        })
+      );
+      
+      setCapsules(capsulesWithCounts);
+
+      // Process moments with signed URLs
+      if (momentsData.length > 0) {
+        const processedMoments = await Promise.all(
+          momentsData.map(moment => getSignedMoment(moment))
+        );
+        setMoments(processedMoments);
+        
+        const momentsMapData: Record<string, SharedMoment> = {};
+        processedMoments.forEach(m => {
+          momentsMapData[m.id] = m;
+        });
+        setMomentsMap(momentsMapData);
       }
+
+      // Mark unread as read
+      const unreadIds = messagesData
+        .filter(m => m.recipient_id === userId && !m.is_read)
+        .map(m => m.id);
+
+      if (unreadIds.length > 0) {
+        supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
+      }
+
+    } catch (error) {
+      console.error('Error initializing chat:', error);
+    } finally {
+      setLoading(false);
     }
-    
-    return newMomentsMap;
-  }, [momentsMap, getSignedMoment]);
+  }, [userId, friendshipId, getSignedMoment]);
 
   useEffect(() => {
-    initializeChat();
+    if (!userId || !friendshipId) return;
 
     const subscription = supabase
       .channel(`chat:${friendshipId}`)
@@ -169,53 +280,41 @@ export function ChatScreen({
         async (payload) => {
           const newMessage = payload.new as Message;
 
-          // Handle starter data
-          if (newMessage.starter_id && !startersMap[newMessage.starter_id]) {
-            const { data: starterData } = await supabase
-              .from('starters')
-              .select('*')
-              .eq('id', newMessage.starter_id)
-              .single();
-
-            if (starterData) {
-              setStartersMap(prev => ({ ...prev, [starterData.id]: starterData }));
-            }
-          }
-
-          // Handle moment data
           if (newMessage.moment_id && !momentsMap[newMessage.moment_id]) {
-            const { data: momentData } = await supabase
+            const { data } = await supabase
               .from('shared_photos')
               .select('*')
               .eq('id', newMessage.moment_id)
               .single();
-
-            if (momentData) {
-              const signedMoment = await getSignedMoment(momentData);
+            
+            if (data) {
+              const signedMoment = await getSignedMoment(data);
               setMomentsMap(prev => ({ ...prev, [signedMoment.id]: signedMoment }));
             }
           }
 
-          // Add to appropriate message list
-          if (newMessage.thread_id) {
-            // It's a thread message
-            if (activeThread && newMessage.thread_id === activeThread.id) {
-              setThreadMessages(prev => [newMessage, ...prev]);
+          if (newMessage.capsule_id) {
+            if (activeCapsule && newMessage.capsule_id === activeCapsule.id) {
+              setCapsuleMessages(prev => [newMessage, ...prev]);
             }
-            // Update thread list last message time
-            setStarterThreads(prev => prev.map(thread => 
-              thread.id === newMessage.thread_id 
-                ? { ...thread, last_message_at: newMessage.created_at, message_count: (thread.message_count || 0) + 1 }
-                : thread
+            setCapsules(prev => prev.map(cap => 
+              cap.id === newMessage.capsule_id 
+                ? { 
+                    ...cap, 
+                    last_activity_at: newMessage.created_at, 
+                    message_count: (cap.message_count || 0) + 1,
+                    unread_count: newMessage.sender_id === friendId 
+                      ? (cap.unread_count || 0) + 1 
+                      : cap.unread_count
+                  }
+                : cap
             ));
           } else {
-            // Regular message
             setMessages(prev => [newMessage, ...prev]);
           }
 
-          // Mark as read if from friend
           if (newMessage.sender_id === friendId) {
-            markMessageAsRead(newMessage.id);
+            supabase.from('messages').update({ is_read: true }).eq('id', newMessage.id);
           }
         }
       )
@@ -224,149 +323,45 @@ export function ChatScreen({
     return () => {
       subscription.unsubscribe();
     };
-  }, [friendshipId, friendId, startersMap, momentsMap, getSignedMoment, activeThread]);
+  }, [userId, friendshipId, friendId, momentsMap, activeCapsule, getSignedMoment]);
 
-  const initializeChat = async () => {
+  useEffect(() => {
+    if (!authLoading && userId) {
+      initializeChat();
+    }
+  }, [authLoading, userId, initializeChat]);
+
+  const loadCapsuleMessages = useCallback(async (capsule: Capsule) => {
+    if (!userId) return;
+    
+    setActiveCapsule(capsule);
+    setActiveTab('capsule');
+    
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id;
-      if (!uid) return;
-      setUserId(uid);
-
-      // Fetch regular messages (non-thread)
-      const { data: messagesData, error } = await supabase
+      const { data: capsuleMessagesData } = await supabase
         .from('messages')
         .select('*')
-        .eq('friendships_id', friendshipId)
-        .is('thread_id', null)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .eq('capsule_id', capsule.id)
+        .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching messages:', error);
-        return;
-      }
+      setCapsuleMessages(capsuleMessagesData || []);
 
-      setMessages(messagesData || []);
-
-      // Fetch starter threads
-      const { data: threadsData } = await supabase
-        .from('starter_threads')
-        .select(`
-          *,
-          starter:starters(*)
-        `)
-        .eq('friendships_id', friendshipId)
-        .order('last_message_at', { ascending: false });
-
-      if (threadsData) {
-        // Get message counts for each thread
-        const threadsWithCounts = await Promise.all(
-          threadsData.map(async (thread) => {
-            const { count } = await supabase
-              .from('messages')
-              .select('*', { count: 'exact', head: true })
-              .eq('thread_id', thread.id);
-            
-            const { count: unreadCount } = await supabase
-              .from('messages')
-              .select('*', { count: 'exact', head: true })
-              .eq('thread_id', thread.id)
-              .eq('recipient_id', uid)
-              .eq('is_read', false);
-
-            return {
-              ...thread,
-              message_count: count || 0,
-              unread_count: unreadCount || 0
-            };
-          })
-        );
-        
-        setStarterThreads(threadsWithCounts);
-      }
-
-      // Fetch starter data
-      const starterIds = [...(messagesData?.map(m => m.starter_id).filter(Boolean) || []), ...(threadsData?.map(t => t.starter_id) || [])];
-      if (starterIds.length > 0) {
-        const { data: startersData } = await supabase
-          .from('starters')
-          .select('*')
-          .in('id', starterIds);
-
-        const startersMapData: Record<string, any> = {};
-        startersData?.forEach(s => {
-          startersMapData[s.id] = s;
-        });
-        setStartersMap(startersMapData);
-      }
-
-      // Process moments
-      const momentIds = messagesData?.map(m => m.moment_id).filter(Boolean) as string[] || [];
-      if (momentIds.length > 0) {
-        const { data: momentsData } = await supabase
-          .from('shared_photos')
-          .select('*')
-          .in('id', momentIds);
-
-        if (momentsData && momentsData.length > 0) {
-          const processedMoments = await processMomentsData(momentsData);
-          setMomentsMap(processedMoments);
-        }
-      }
-
-      // Mark unread messages as read
-      const unreadIds = messagesData
-        ?.filter(m => m.recipient_id === uid && !m.is_read)
-        .map(m => m.id) || [];
-
-      if (unreadIds.length > 0) {
-        await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-      }
-    } catch (error) {
-      console.error('Error initializing chat:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadThreadMessages = async (thread: StarterThread) => {
-    setActiveThread(thread);
-    setActiveTab('thread');
-    
-    // Fetch messages for this thread
-    const { data: threadMessagesData } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('thread_id', thread.id)
-      .order('created_at', { ascending: false });
-
-    setThreadMessages(threadMessagesData || []);
-
-    // Mark unread messages as read
-    if (userId) {
-      const unreadIds = threadMessagesData
+      const unreadIds = capsuleMessagesData
         ?.filter(m => m.recipient_id === userId && !m.is_read)
         .map(m => m.id) || [];
 
       if (unreadIds.length > 0) {
         await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-        // Update local unread count
-        setStarterThreads(prev => prev.map(t => 
-          t.id === thread.id ? { ...t, unread_count: 0 } : t
+        setCapsules(prev => prev.map(c => 
+          c.id === capsule.id ? { ...c, unread_count: 0 } : c
         ));
       }
+    } catch (error) {
+      console.error('Error loading capsule messages:', error);
     }
-  };
+  }, [userId]);
 
-  const markMessageAsRead = async (messageId: string) => {
-    await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .eq('id', messageId);
-  };
-
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!inputText.trim() || !userId || sending) return;
 
     setSending(true);
@@ -381,23 +376,19 @@ export function ChatScreen({
         content: messageContent,
       };
 
-      // If in thread view, add thread_id
-      if (activeTab === 'thread' && activeThread) {
-        messageData.thread_id = activeThread.id;
-        messageData.starter_id = activeThread.starter_id;
+      if (activeTab === 'capsule' && activeCapsule) {
+        messageData.capsule_id = activeCapsule.id;
       }
 
       const { error } = await supabase.from('messages').insert(messageData);
 
-      if (error) {
-        console.error('Error sending message:', error);
-        setInputText(messageContent);
-      } else if (activeThread) {
-        // Update thread's last_message_at
+      if (error) throw error;
+
+      if (activeCapsule) {
         await supabase
-          .from('starter_threads')
-          .update({ last_message_at: new Date().toISOString() })
-          .eq('id', activeThread.id);
+          .from('capsules')
+          .update({ last_activity_at: new Date().toISOString() })
+          .eq('id', activeCapsule.id);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -405,12 +396,10 @@ export function ChatScreen({
     } finally {
       setSending(false);
     }
-  };
+  }, [inputText, userId, friendId, friendshipId, activeTab, activeCapsule, sending]);
 
   const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isOwnMessage = item.sender_id === userId;
-    const starter = item.starter_id ? startersMap[item.starter_id] : null;
-    const starterColor = starter?.colour;
 
     if (item.moment_id && momentsMap[item.moment_id]) {
       const moment = momentsMap[item.moment_id];
@@ -435,34 +424,40 @@ export function ChatScreen({
         <View
           style={[
             styles.messageBubble,
-            { backgroundColor: starterColor || (isOwnMessage ? colors.primary : colors.backgroundSecondary) },
+            { backgroundColor: isOwnMessage ? colors.primary : colors.backgroundSecondary },
           ]}
         >
-          <Text style={[styles.messageText, { color: starterColor ? '#fff' : (isOwnMessage ? '#fff' : colors.text) }]}>
+          <Text style={[styles.messageText, { color: isOwnMessage ? '#fff' : colors.text }]}>
             {item.content}
           </Text>
-          <Text style={[styles.messageTime, { color: starterColor || isOwnMessage ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]}>
+          <Text style={[styles.messageTime, { color: isOwnMessage ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]}>
             {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
       </View>
     );
-  }, [userId, startersMap, momentsMap, colors]);
+  }, [userId, momentsMap, colors]);
 
-  const renderStarterThread = ({ item }: { item: StarterThread }) => {
-    const starter = item.starter || startersMap[item.starter_id];
+  const renderCapsule = useCallback(({ item }: { item: Capsule }) => {
     const hasUnread = item.unread_count && item.unread_count > 0;
+    const iconName = 
+      item.capsule_type === 'photos' ? 'images' :
+      item.capsule_type === 'recipes' ? 'restaurant' :
+      item.capsule_type === 'plans' ? 'calendar' :
+      item.capsule_type === 'general' ? 'folder' : 'chatbubbles';
 
     return (
       <TouchableOpacity 
-        style={[styles.threadCard, { backgroundColor: colors.backgroundSecondary }]}
-        onPress={() => loadThreadMessages(item)}
+        style={[styles.capsuleCard, { backgroundColor: colors.backgroundSecondary }]}
+        onPress={() => loadCapsuleMessages(item)}
       >
-        <View style={[styles.threadColorBar, { backgroundColor: starter?.colour || colors.primary }]} />
-        <View style={styles.threadContent}>
-          <View style={styles.threadHeader}>
-            <Text style={[styles.threadTitle, { color: colors.text }]} numberOfLines={2}>
-              {starter?.text || 'Loading...'}
+        <View style={styles.capsuleIcon}>
+          <Ionicons name={iconName as any} size={24} color={colors.primary} />
+        </View>
+        <View style={styles.capsuleContent}>
+          <View style={styles.capsuleHeader}>
+            <Text style={[styles.capsuleTitle, { color: colors.text }]} numberOfLines={1}>
+              {item.title}
             </Text>
             {hasUnread && (
               <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
@@ -470,29 +465,57 @@ export function ChatScreen({
               </View>
             )}
           </View>
-          <View style={styles.threadFooter}>
-            <Text style={[styles.threadCategory, { color: colors.textSecondary }]}>
-              {starter?.category || 'conversation'}
+          {item.description && (
+            <Text style={[styles.capsuleDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+              {item.description}
             </Text>
-            <Text style={[styles.threadMeta, { color: colors.textSecondary }]}>
+          )}
+          <View style={styles.capsuleFooter}>
+            <Text style={[styles.capsuleMeta, { color: colors.textSecondary }]}>
               {item.message_count || 0} messages
             </Text>
+            <Text style={[styles.capsuleTime, { color: colors.textSecondary }]}>
+              {new Date(item.last_activity_at).toLocaleDateString()}
+            </Text>
           </View>
-          <Text style={[styles.threadTime, { color: colors.textSecondary }]}>
-            {new Date(item.last_message_at).toLocaleDateString()}
-          </Text>
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [colors, loadCapsuleMessages]);
 
-  const handleOpenOverlay = () => setShowOverlay(true);
-  const handleCloseOverlay = () => setShowOverlay(false);
+  const renderMoment = useCallback(({ item }: { item: SharedMoment }) => {
+    const images = item.storage_path.includes(',')
+      ? item.storage_path.split(',')
+      : [item.storage_path];
 
-  const handleStartConversation = () => {
+    return (
+      <View style={styles.momentContainer}>
+        <MomentCard
+          title={item.title}
+          reflection={item.reflection}
+          images={images}
+        />
+        <Text style={[styles.momentDate, { color: colors.textSecondary }]}>
+          {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+    );
+  }, [colors]);
+
+  const displayContent = useMemo(() => {
+    if (activeTab === 'capsule' && activeCapsule) {
+      return capsuleMessages;
+    }
+    return messages;
+  }, [activeTab, messages, capsuleMessages, activeCapsule]);
+
+  const handleOpenOverlay = useCallback(() => setShowOverlay(true), []);
+  const handleCloseOverlay = useCallback(() => setShowOverlay(false), []);
+
+  const handleCreateCapsule = useCallback(() => {
     setShowOverlay(false);
     router.push({
-      pathname: "/StartConversation",
+      pathname: "/CreateCapsule",
       params: { 
         friendshipId, 
         friendId,
@@ -500,27 +523,30 @@ export function ChatScreen({
         returnToChat: 'true'
       },
     });
-  };
+  }, [router, friendshipId, friendId, friendName]);
 
-  const handleCreateMoment = () => {
+  const handleCreateMoment = useCallback(() => {
     setShowOverlay(false);
     router.push({
       pathname: "/ShareMoment",
       params: { friendshipId, friendId },
     });
-  };
+  }, [router, friendshipId, friendId]);
 
-  const getDisplayContent = useCallback(() => {
-    if (activeTab === 'thread' && activeThread) {
-      return threadMessages;
-    }
-    return messages;
-  }, [activeTab, messages, threadMessages, activeThread]);
-
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!userId) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <Text style={[styles.errorText, { color: colors.textSecondary }]}>
+          Please log in to continue
+        </Text>
       </View>
     );
   }
@@ -530,18 +556,27 @@ export function ChatScreen({
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity 
-          onPress={activeTab === 'thread' ? () => setActiveTab('starters') : onBack} 
+          onPress={activeTab === 'capsule' ? () => setActiveTab('capsules') : onBack} 
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
 
         <View style={styles.headerInfo}>
-          {activeTab === 'thread' && activeThread ? (
-            <View style={styles.threadHeaderInfo}>
-              <View style={[styles.threadDot, { backgroundColor: startersMap[activeThread.starter_id]?.colour || colors.primary }]} />
+          {activeTab === 'capsule' && activeCapsule ? (
+            <View style={styles.capsuleHeaderInfo}>
+              <Ionicons 
+                name={
+                  activeCapsule.capsule_type === 'photos' ? 'images' :
+                  activeCapsule.capsule_type === 'recipes' ? 'restaurant' :
+                  activeCapsule.capsule_type === 'plans' ? 'calendar' :
+                  activeCapsule.capsule_type === 'general' ? 'folder' : 'chatbubbles'
+                } 
+                size={20} 
+                color={colors.primary} 
+              />
               <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-                Thread: {startersMap[activeThread.starter_id]?.category || 'Conversation'}
+                {activeCapsule.title}
               </Text>
             </View>
           ) : (
@@ -563,8 +598,8 @@ export function ChatScreen({
         </TouchableOpacity>
       </View>
 
-      {/* Tab Switcher - hide when in thread view */}
-      {activeTab !== 'thread' && (
+      {/* Tab Switcher */}
+      {activeTab !== 'capsule' && (
         <View style={[styles.tabContainer, { backgroundColor: colors.backgroundSecondary }]}>
           <TouchableOpacity
             style={[
@@ -585,56 +620,99 @@ export function ChatScreen({
           <TouchableOpacity
             style={[
               styles.tab,
-              activeTab === 'starters' && styles.activeTab,
-              activeTab === 'starters' && { backgroundColor: colors.primary }
+              activeTab === 'capsules' && styles.activeTab,
+              activeTab === 'capsules' && { backgroundColor: colors.primary }
             ]}
-            onPress={() => setActiveTab('starters')}
+            onPress={() => setActiveTab('capsules')}
           >
             <Ionicons 
-              name="sparkles" 
+              name="folder" 
               size={16} 
-              color={activeTab === 'starters' ? '#fff' : colors.textSecondary}
+              color={activeTab === 'capsules' ? '#fff' : colors.textSecondary}
               style={{ marginRight: 6 }}
             />
             <Text style={[
               styles.tabText,
-              { color: activeTab === 'starters' ? '#fff' : colors.textSecondary }
+              { color: activeTab === 'capsules' ? '#fff' : colors.textSecondary }
             ]}>
-              Threads ({starterThreads.length})
+              Capsules ({capsules.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab,
+              activeTab === 'moments' && styles.activeTab,
+              activeTab === 'moments' && { backgroundColor: colors.primary }
+            ]}
+            onPress={() => setActiveTab('moments')}
+          >
+            <Ionicons 
+              name="images" 
+              size={16} 
+              color={activeTab === 'moments' ? '#fff' : colors.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={[
+              styles.tabText,
+              { color: activeTab === 'moments' ? '#fff' : colors.textSecondary }
+            ]}>
+              Moments ({moments.length})
             </Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Thread starter info */}
-      {activeTab === 'thread' && activeThread && (
-        <View style={[styles.threadInfoBar, { backgroundColor: startersMap[activeThread.starter_id]?.colour || colors.primary }]}>
-          <Ionicons name="sparkles" size={16} color="#fff" />
-          <Text style={styles.threadInfoText} numberOfLines={2}>
-            {startersMap[activeThread.starter_id]?.text}
+      {/* Capsule info bar */}
+      {activeTab === 'capsule' && activeCapsule?.description && (
+        <View style={[styles.capsuleInfoBar, { backgroundColor: colors.backgroundSecondary }]}>
+          <Text style={[styles.capsuleInfoText, { color: colors.textSecondary }]} numberOfLines={2}>
+            {activeCapsule.description}
           </Text>
         </View>
       )}
 
       {/* Content */}
-      {activeTab === 'starters' ? (
+      {activeTab === 'capsules' ? (
         <FlatList
-          data={starterThreads}
-          renderItem={renderStarterThread}
+          data={capsules}
+          renderItem={renderCapsule}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.threadsList}
+          contentContainerStyle={styles.capsulesList}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="sparkles-outline" size={48} color={colors.textSecondary} />
+              <Ionicons name="folder-outline" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                No starter threads yet
+                No capsules yet
               </Text>
               <TouchableOpacity 
                 style={[styles.startButton, { backgroundColor: colors.primary }]}
-                onPress={handleStartConversation}
+                onPress={handleCreateCapsule}
               >
-                <Text style={styles.startButtonText}>Start a Conversation</Text>
+                <Text style={styles.startButtonText}>Create a Capsule</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      ) : activeTab === 'moments' ? (
+        <FlatList
+          data={moments}
+          renderItem={renderMoment}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.momentsList}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="images-outline" size={48} color={colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                No moments shared yet
+              </Text>
+              <TouchableOpacity 
+                style={[styles.startButton, { backgroundColor: colors.primary }]}
+                onPress={handleCreateMoment}
+              >
+                <Text style={styles.startButtonText}>Share a Moment</Text>
               </TouchableOpacity>
             </View>
           }
@@ -642,7 +720,7 @@ export function ChatScreen({
       ) : (
         <FlatList
           ref={flatListRef}
-          data={getDisplayContent()}
+          data={displayContent}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id}
           inverted
@@ -650,20 +728,20 @@ export function ChatScreen({
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
-          windowSize={10}
+          windowSize={8}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubble-outline" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {activeTab === 'thread' ? 'Start the conversation' : 'No messages yet'}
+                {activeTab === 'capsule' ? 'Start the conversation' : 'No messages yet'}
               </Text>
             </View>
           }
         />
       )}
 
-      {/* Input - only show for 'all' tab or when in thread */}
-      {(activeTab === 'all' || activeTab === 'thread') && (
+      {/* Input */}
+      {(activeTab === 'all' || activeTab === 'capsule') && (
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
@@ -677,17 +755,17 @@ export function ChatScreen({
 
             <TextInput
               style={[styles.textInput, { color: colors.text }]}
-              placeholder={activeTab === 'thread' ? "Reply to thread..." : "Type a message..."}
+              placeholder={activeTab === 'capsule' ? "Reply to capsule..." : "Type a message..."}
               placeholderTextColor={colors.textSecondary}
               value={inputText}
               onChangeText={setInputText}
               multiline
-              onSubmitEditing={() => sendMessage()}
+              onSubmitEditing={sendMessage}
             />
 
             <TouchableOpacity
               style={[styles.sendButton, { opacity: inputText.trim() ? 1 : 0.5 }]}
-              onPress={() => sendMessage()}
+              onPress={sendMessage}
               disabled={!inputText.trim() || sending}
             >
               <Ionicons
@@ -713,9 +791,9 @@ export function ChatScreen({
           onPress={handleCloseOverlay}
         >
           <View style={[styles.overlayContent, { backgroundColor: colors.background }]}>
-            <TouchableOpacity style={styles.overlayOption} onPress={handleStartConversation}>
-              <Ionicons name="sparkles-outline" size={24} color={colors.primary} />
-              <Text style={[styles.overlayText, { color: colors.text }]}>Start Conversation</Text>
+            <TouchableOpacity style={styles.overlayOption} onPress={handleCreateCapsule}>
+              <Ionicons name="folder-outline" size={24} color={colors.primary} />
+              <Text style={[styles.overlayText, { color: colors.text }]}>Create Capsule</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.overlayOption} onPress={handleCreateMoment}>
@@ -738,165 +816,160 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  errorText: {
+    marginTop: 16,
+    textAlign: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.1)',
+    borderBottomColor: '#e1e8ed',
   },
   backButton: {
-    padding: 8,
+    padding: 4,
   },
   headerInfo: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 12,
   },
-  threadHeaderInfo: {
+  capsuleHeaderInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  threadDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginRight: 8,
   },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 12,
-  },
   avatarPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    color: 'white',
-    fontSize: 16,
+    color: '#fff',
     fontWeight: 'bold',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
+    flex: 1,
+    marginLeft: 8,
   },
   menuButton: {
-    padding: 8,
+    padding: 4,
   },
   tabContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    gap: 8,
   },
   tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
+    marginRight: 8,
   },
   activeTab: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  threadInfoBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
-  },
-  threadInfoText: {
-    color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
-    marginLeft: 8,
-    flex: 1,
   },
-  threadsList: {
+  capsuleInfoBar: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
-  threadCard: {
+  capsuleInfoText: {
+    fontSize: 14,
+  },
+  capsulesList: {
+    padding: 16,
+  },
+  capsuleCard: {
     flexDirection: 'row',
-    borderRadius: 12,
     marginBottom: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  threadColorBar: {
-    width: 4,
-  },
-  threadContent: {
-    flex: 1,
+    borderRadius: 12,
     padding: 12,
   },
-  threadHeader: {
+  capsuleIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  capsuleContent: {
+    flex: 1,
+  },
+  capsuleHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  threadTitle: {
-    fontSize: 15,
-    fontWeight: '500',
+  capsuleTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     flex: 1,
     marginRight: 8,
   },
+  capsuleDescription: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  capsuleFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  capsuleMeta: {
+    fontSize: 12,
+  },
+  capsuleTime: {
+    fontSize: 12,
+  },
   unreadBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
     minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 6,
   },
   unreadText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
-  threadFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
+  momentsList: {
+    padding: 16,
   },
-  threadCategory: {
-    fontSize: 13,
-    textTransform: 'capitalize',
+  momentContainer: {
+    marginBottom: 16,
   },
-  threadMeta: {
-    fontSize: 13,
-  },
-  threadTime: {
+  momentDate: {
     fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
   },
   messagesList: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    padding: 16,
   },
   messageContainer: {
-    marginVertical: 4,
+    marginBottom: 8,
   },
   ownMessage: {
     alignItems: 'flex-end',
@@ -905,74 +978,80 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   messageBubble: {
-    maxWidth: '75%',
-    padding: 12,
+    maxWidth: '80%',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 18,
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 20,
   },
   messageTime: {
     fontSize: 12,
     marginTop: 4,
   },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-  },
-  attachButton: {
-    paddingBottom: 8,
-    paddingRight: 8,
-  },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    maxHeight: 100,
-  },
-  sendButton: {
-    paddingBottom: 8,
-    paddingLeft: 8,
-  },
   emptyContainer: {
-    alignItems: 'center',
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingVertical: 48,
   },
   emptyText: {
-    marginTop: 12,
     fontSize: 16,
+    marginTop: 16,
+    marginBottom: 24,
   },
   startButton: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
   },
   startButtonText: {
     color: '#fff',
-    fontSize: 14,
     fontWeight: '600',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e1e8ed',
+  },
+  attachButton: {
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  textInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e1e8ed',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    maxHeight: 100,
+    marginRight: 8,
+  },
+  sendButton: {
+    padding: 8,
+    marginBottom: 4,
   },
   overlayBackground: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   overlayContent: {
-    padding: 20,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
   },
   overlayOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
   overlayText: {
     fontSize: 16,
