@@ -51,6 +51,7 @@ interface SharedMoment {
   storage_path: string;
   created_at: string;
   uploader_id: string;
+  shared_with_id: string;
   capsule_id?: string;
 }
 
@@ -315,6 +316,36 @@ export function ChatScreen({
 
           if (newMessage.sender_id === friendId) {
             supabase.from('messages').update({ is_read: true }).eq('id', newMessage.id);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'capsules',
+          filter: `friendships_id=eq.${friendshipId}`,
+        },
+        async (payload) => {
+          const newCapsule = payload.new as Capsule;
+          setCapsules(prev => [{ ...newCapsule, message_count: 0, unread_count: 0 }, ...prev]);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'shared_photos',
+        },
+        async (payload) => {
+          const newMoment = payload.new as SharedMoment;
+          // Check if this moment is relevant to this friendship
+          if (newMoment.uploader_id === userId || newMoment.shared_with_id === userId) {
+            const signedMoment = await getSignedMoment(newMoment);
+            setMoments(prev => [signedMoment, ...prev]);
+            setMomentsMap(prev => ({ ...prev, [signedMoment.id]: signedMoment }));
           }
         }
       )
