@@ -1,14 +1,22 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
-import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import React, { useState } from "react";
+import { Dimensions, FlatList, Image, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../context/ThemeProvider";
 import { MomentCardProps } from "../types";
 
+const { width } = Dimensions.get("window");
+const containerWidth = Dimensions.get("window").width - 40; // matches container margins
+const containerHeight = containerWidth / 0.8;
+
+
 export const MomentCard: React.FC<MomentCardProps> = ({
-  imageUri,
-  onAddPress,
+  title,
+  reflection,
+  images
 }) => {
   const { colors, theme } = useTheme();
+  const [activeIndex, setActiveIndex] = useState(0);
+
 
   return (
     <View
@@ -20,39 +28,42 @@ export const MomentCard: React.FC<MomentCardProps> = ({
         },
       ]}
     >
-      <Image
-        source={{ uri: imageUri }}
-        style={styles.image}
-        resizeMode="cover"
+      <FlatList
+        data={images}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(event) => {
+          const index = Math.round(
+            event.nativeEvent.contentOffset.x / width
+          );
+          setActiveIndex(index);
+        }}
+        renderItem={({ item }) => (
+          <Image
+            source={{ uri: item }}
+            style={styles.image}
+            resizeMode="cover"
+          />
+        )}
+        keyExtractor={(_, index) => index.toString()}
       />
 
-      {/* Gradient overlay */}
+      {/* Gradient overlay for text */}
       <LinearGradient
         colors={["transparent", "rgba(0,0,0,0.6)"]}
         style={styles.gradientOverlay}
       />
 
-      <TouchableOpacity
-        style={[
-          styles.addButton,
-          {
-            backgroundColor: colors.background,
-            ...theme.shadows.md,
-          },
-        ]}
-        onPress={onAddPress}
-        activeOpacity={0.8}
-      >
-        {/* Plus icon placeholder */}
-        <View style={styles.plusIcon}>
-          <View
-            style={[styles.plusHorizontal, { backgroundColor: colors.title }]}
-          />
-          <View
-            style={[styles.plusVertical, { backgroundColor: colors.title }]}
-          />
-        </View>
-      </TouchableOpacity>
+      {/* Title and reflection */}
+      <View style={styles.textOverlay}>
+        {title ? <Text style={[styles.title, { color: colors.title }]}>{title}</Text> : null}
+        {reflection ? (
+          <Text style={[styles.reflection, { color: colors.text }]} numberOfLines={3}>
+            {reflection}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 };
@@ -67,8 +78,9 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   image: {
-    width: "100%",
-    height: "100%",
+    width: containerWidth,
+    height: containerHeight,   // fill the card height
+    borderRadius: 20,    // match container
   },
   gradientOverlay: {
     position: "absolute",
@@ -77,32 +89,18 @@ const styles = StyleSheet.create({
     right: 0,
     height: 120,
   },
-  addButton: {
+  textOverlay: {
     position: "absolute",
     bottom: 16,
+    left: 16,
     right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
   },
-  plusIcon: {
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
+  title: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 4,
   },
-  plusHorizontal: {
-    position: "absolute",
-    width: 16,
-    height: 2,
-    borderRadius: 1,
-  },
-  plusVertical: {
-    position: "absolute",
-    width: 2,
-    height: 16,
-    borderRadius: 1,
+  reflection: {
+    fontSize: 14,
   },
 });

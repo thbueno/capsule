@@ -17,6 +17,8 @@ export interface StarterCard {
 export interface MomentCard {
   id: string;
   imageUri: string;
+  title: string;
+  reflection: string;
   timestamp?: Date;
   author?: string;
 }
@@ -41,7 +43,9 @@ export interface StarterCardProps {
 }
 
 export interface MomentCardProps {
-  imageUri: string;
+  images: string | string[];
+  title: string;
+  reflection: string;
   onAddPress?: () => void;
 }
 

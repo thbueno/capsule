@@ -1,9 +1,9 @@
-import { Stack, usePathname, router } from "expo-router";
-import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
-import { View, Text } from "react-native";
+import { ThemeProvider } from "@/context/ThemeProvider"; // adjust path
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
-
+import { router, Stack, usePathname } from "expo-router";
+import { useEffect, useState } from "react";
+import { Text, View } from "react-native";
+import { supabase } from "../lib/supabase";
 
 export default function Layout() {
   const [loading, setLoading] = useState(true);
@@ -99,5 +99,9 @@ export default function Layout() {
     );
   }
 
-  return <Stack />;
+  return (
+    <ThemeProvider>
+      <Stack />
+    </ThemeProvider>
+  );
 }
