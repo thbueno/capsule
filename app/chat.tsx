@@ -1,16 +1,19 @@
 import { useTheme } from '@/context/ThemeProvider';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -53,6 +56,12 @@ interface SharedMoment {
   uploader_id: string;
   shared_with_id: string;
   capsule_id?: string;
+}
+
+interface ImageAsset {
+  uri: string;
+  base64?: string | null;
+  type?: "image" | "video" | "livePhoto" | "pairedVideo";
 }
 
 interface ChatScreenProps {
@@ -169,6 +178,12 @@ export function ChatScreen({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [showImageComposer, setShowImageComposer] = useState(false);
+  
+  // New state for image uploads
+  const [selectedImages, setSelectedImages] = useState<ImageAsset[]>([]);
+  const [imageCaption, setImageCaption] = useState('');
+  const [uploading, setUploading] = useState(false);
   
   const [momentsMap, setMomentsMap] = useState<Record<string, SharedMoment>>({});
   
@@ -392,6 +407,148 @@ export function ChatScreen({
     }
   }, [userId]);
 
+  // New function: Remove image from selection
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+
+  // New function: Pick images and open composer
+  const pickImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert("Permission denied", "Camera roll permission is required.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: 5,
+      quality: Platform.OS === "web" ? 0.5 : 0.8,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets.length > 0) {
+      const assets = result.assets.map(asset => ({
+        uri: asset.uri,
+        base64: asset.base64,
+        type: asset.type
+      } as ImageAsset));
+
+      // append new images instead of replacing
+      setSelectedImages(prev => [...prev, ...assets]);
+      setShowImageComposer(true);
+    }
+
+  };
+
+  // New function: Send images with caption
+  const sendImages = useCallback(async () => {
+    if (selectedImages.length === 0 || !userId || uploading) return;
+
+    setUploading(true);
+    const messageContent = imageCaption.trim() || "Shared an image";
+
+    try {
+      const uploadedPaths: string[] = [];
+
+      for (const image of selectedImages) {
+        let fileExt = "jpg";
+        if (image.type && image.type === "image") {
+          const uriExt = image.uri.split(".").pop()?.toLowerCase();
+          if (uriExt && ["jpg", "jpeg", "png", "gif", "webp"].includes(uriExt)) {
+            fileExt = uriExt === "jpeg" ? "jpg" : uriExt;
+          }
+        }
+
+        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+        const sortedFolder = [userId, friendId].sort().join("_");
+        const filePath = `${sortedFolder}/${fileName}`;
+        const bucket = "shared-photos";
+
+        let fileToUpload;
+
+        if (Platform.OS === "web") {
+          const response = await fetch(image.uri);
+          fileToUpload = await response.blob();
+        } else {
+          if (!image.base64) throw new Error("Base64 data missing for mobile upload");
+          const base64Data = image.base64;
+          const blob = await fetch(`data:image/jpeg;base64,${base64Data}`).then(res => res.blob());
+          fileToUpload = blob;
+        }
+
+
+        const { error: uploadError } = await supabase.storage
+          .from(bucket)
+          .upload(filePath, fileToUpload, {
+            contentType: image.type || "image/jpeg",
+            upsert: false,
+          });
+
+        if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+        uploadedPaths.push(`${bucket}/${filePath}`);
+      }
+
+      // Insert into shared_photos
+      const momentData: any = {
+        uploader_id: userId,
+        shared_with_id: friendId,
+        storage_path: uploadedPaths.join(","),
+        title: messageContent,
+        reflection: "",
+      };
+
+      // If in a capsule, add capsule_id
+      if (activeTab === 'capsule' && activeCapsule) {
+        momentData.capsule_id = activeCapsule.id;
+      }
+
+      const { data: insertedMoment, error: insertError } = await supabase
+        .from("shared_photos")
+        .insert(momentData)
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      // Send message
+      const messageData: any = {
+        sender_id: userId,
+        recipient_id: friendId,
+        friendships_id: friendshipId,
+        content: messageContent,
+        moment_id: insertedMoment.id,
+      };
+
+      if (activeTab === 'capsule' && activeCapsule) {
+        messageData.capsule_id = activeCapsule.id;
+      }
+
+      const { error } = await supabase.from('messages').insert(messageData);
+      if (error) throw error;
+
+      if (activeCapsule) {
+        await supabase
+          .from('capsules')
+          .update({ last_activity_at: new Date().toISOString() })
+          .eq('id', activeCapsule.id);
+      }
+
+      // Close composer and reset
+      setShowImageComposer(false);
+      setSelectedImages([]);
+      setImageCaption('');
+    } catch (error: any) {
+      console.error('Error sending images:', error);
+      Alert.alert("Error", error.message || "Failed to send images");
+    } finally {
+      setUploading(false);
+    }
+  }, [selectedImages, imageCaption, userId, friendId, friendshipId, activeTab, activeCapsule, uploading]);
+
+  // Updated sendMessage - back to text only
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || !userId || sending) return;
 
@@ -564,6 +721,11 @@ export function ChatScreen({
     });
   }, [router, friendshipId, friendId]);
 
+  const handleSendImage = useCallback(() => {
+    setShowOverlay(false);
+    pickImage();
+  }, []);
+
   if (authLoading || loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -703,6 +865,25 @@ export function ChatScreen({
         </View>
       )}
 
+      {/* Image Preview */}
+      {selectedImages.length > 0 && (
+        <View style={[styles.imagePreviewContainer, { backgroundColor: colors.backgroundSecondary }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagePreviewScroll}>
+            {selectedImages.map((img, idx) => (
+              <View key={idx} style={styles.imagePreviewWrapper}>
+                <Image source={{ uri: img.uri }} style={styles.imagePreview} />
+                <TouchableOpacity
+                  onPress={() => removeImage(idx)}
+                  style={styles.removeImageButton}
+                >
+                  <Ionicons name="close-circle" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Content */}
       {activeTab === 'capsules' ? (
         <FlatList
@@ -809,6 +990,56 @@ export function ChatScreen({
         </KeyboardAvoidingView>
       )}
 
+      {/* Image Composer Modal */}
+      <Modal
+        visible={showImageComposer}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowImageComposer(false)}
+      >
+        <SafeAreaView style={[styles.composerContainer, { backgroundColor: colors.background }]}>
+          <View style={styles.composerHeader}>
+            <TouchableOpacity onPress={() => setShowImageComposer(false)}>
+              <Ionicons name="close" size={28} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.composerTitle, { color: colors.text }]}>
+              {selectedImages.length} Image{selectedImages.length > 1 ? "s" : ""}
+            </Text>
+            <TouchableOpacity 
+              onPress={sendImages} 
+              disabled={uploading || selectedImages.length === 0}
+            >
+              <Ionicons 
+                name="send" 
+                size={26} 
+                color={uploading || selectedImages.length === 0 ? colors.textSecondary : colors.primary} 
+              />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.composerImages}>
+            {selectedImages.map((img, idx) => (
+              <View key={idx} style={styles.composerImageWrapper}>
+                <Image source={{ uri: img.uri }} style={styles.composerImage} />
+                <TouchableOpacity onPress={() => removeImage(idx)} style={styles.removeComposerImage}>
+                  <Ionicons name="close-circle" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+
+          <TextInput
+            style={[styles.composerInput, { color: colors.text, borderColor: colors.textSecondary }]}
+            placeholder="Add a caption..."
+            placeholderTextColor={colors.textSecondary}
+            value={imageCaption}
+            onChangeText={setImageCaption}
+            multiline
+          />
+        </SafeAreaView>
+      </Modal>
+
+
       {/* Overlay */}
       <Modal
         visible={showOverlay}
@@ -830,6 +1061,11 @@ export function ChatScreen({
             <TouchableOpacity style={styles.overlayOption} onPress={handleCreateMoment}>
               <Ionicons name="images-outline" size={24} color={colors.primary} />
               <Text style={[styles.overlayText, { color: colors.text }]}>Share a Moment</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.overlayOption} onPress={pickImage}>
+              <Ionicons name="camera-outline" size={24} color={colors.primary} />
+              <Text style={[styles.overlayText, { color: colors.text }]}>Share an Image</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1088,4 +1324,87 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 12,
   },
+  imagePreviewContainer: {
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  imagePreviewScroll: {
+    paddingHorizontal: 12,
+  },
+  imagePreviewWrapper: {
+    position: 'relative',
+    marginRight: 8,
+  },
+  imagePreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  composerContainer: {
+  flex: 1,
+  paddingHorizontal: 16,
+  paddingTop: 10,
+},
+composerHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 10,
+},
+composerTitle: {
+  fontSize: 18,
+  fontWeight: '600',
+},
+composerImages: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  justifyContent: 'center',
+},
+composerImageWrapper: {
+  position: 'relative',
+  margin: 6,
+},
+composerImage: {
+  width: 100,
+  height: 100,
+  borderRadius: 8,
+  backgroundColor: '#ddd',
+},
+removeComposerImage: {
+  position: 'absolute',
+  top: -6,
+  right: -6,
+  backgroundColor: '#000',
+  borderRadius: 12,
+  width: 24,
+  height: 24,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+composerInput: {
+  borderWidth: 1,
+  borderRadius: 12,
+  padding: 12,
+  marginVertical: 12,
+  fontSize: 16,
+  minHeight: 60,
+},
 });
