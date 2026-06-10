@@ -1,106 +1,108 @@
+import { useTheme } from "@/context/ThemeProvider";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
-import { Dimensions, FlatList, Image, StyleSheet, Text, View } from "react-native";
-import { useTheme } from "../context/ThemeProvider";
-import { MomentCardProps } from "../types";
+import { FlatList, Image, StyleSheet, Text, View } from "react-native";
 
-const { width } = Dimensions.get("window");
-const containerWidth = Dimensions.get("window").width - 40; // matches container margins
-const containerHeight = containerWidth / 0.8;
+interface MomentCardProps {
+  title: string;
+  reflection: string;
+  images: string[];
+  /** Card width; height follows the 4:5 design ratio. */
+  width?: number;
+}
 
-
-export const MomentCard: React.FC<MomentCardProps> = ({
-  title,
-  reflection,
-  images
-}) => {
-  const { colors, theme } = useTheme();
+/** Photo card with gradient caption overlay — used inline in chat threads. */
+export function MomentCard({ title, reflection, images, width = 260 }: MomentCardProps) {
+  const { theme } = useTheme();
   const [activeIndex, setActiveIndex] = useState(0);
-
+  const height = width / 0.8;
 
   return (
-    <View
-      style={[
-        styles.container,
-        {
-          backgroundColor: colors.backgroundSecondary,
-          ...theme.shadows.lg,
-        },
-      ]}
-    >
+    <View style={[styles.container, { width, height }, theme.shadows.md]}>
       <FlatList
         data={images}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={(event) => {
-          const index = Math.round(
-            event.nativeEvent.contentOffset.x / width
-          );
-          setActiveIndex(index);
+          setActiveIndex(Math.round(event.nativeEvent.contentOffset.x / width));
         }}
         renderItem={({ item }) => (
-          <Image
-            source={{ uri: item }}
-            style={styles.image}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: item }} style={{ width, height }} resizeMode="cover" />
         )}
         keyExtractor={(_, index) => index.toString()}
       />
 
-      {/* Gradient overlay for text */}
       <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.6)"]}
+        colors={["transparent", "rgba(0,0,0,0.65)"]}
         style={styles.gradientOverlay}
+        pointerEvents="none"
       />
 
-      {/* Title and reflection */}
-      <View style={styles.textOverlay}>
-        {title ? <Text style={[styles.title, { color: colors.title }]}>{title}</Text> : null}
+      <View style={styles.textOverlay} pointerEvents="none">
+        {title ? <Text style={styles.title}>{title}</Text> : null}
         {reflection ? (
-          <Text style={[styles.reflection, { color: colors.text }]} numberOfLines={3}>
+          <Text style={styles.reflection} numberOfLines={3}>
             {reflection}
           </Text>
         ) : null}
       </View>
+
+      {images.length > 1 && (
+        <View style={styles.dots} pointerEvents="none">
+          {images.map((_, index) => (
+            <View
+              key={index}
+              style={[styles.dot, { opacity: index === activeIndex ? 1 : 0.4 }]}
+            />
+          ))}
+        </View>
+      )}
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     borderRadius: 20,
-    marginHorizontal: 20,
-    marginBottom: 20,
     overflow: "hidden",
-    aspectRatio: 0.8, // 4:5 aspect ratio
     position: "relative",
-  },
-  image: {
-    width: containerWidth,
-    height: containerHeight,   // fill the card height
-    borderRadius: 20,    // match container
+    backgroundColor: "#00000010",
   },
   gradientOverlay: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: 120,
+    height: 110,
   },
   textOverlay: {
     position: "absolute",
-    bottom: 16,
-    left: 16,
-    right: 16,
+    bottom: 14,
+    left: 14,
+    right: 14,
   },
   title: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 4,
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 2,
   },
   reflection: {
-    fontSize: 14,
+    fontSize: 13,
+    color: "rgba(255,255,255,0.9)",
+  },
+  dots: {
+    position: "absolute",
+    top: 12,
+    alignSelf: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#fff",
   },
 });

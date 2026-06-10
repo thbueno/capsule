@@ -1,5 +1,4 @@
 import { Avatar } from "@/components/Avatar";
-import { CapsuleCard } from "@/components/CapsuleCard";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterPills } from "@/components/FilterPills";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -9,16 +8,14 @@ import { useTheme } from "@/context/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import {
   fetchCapsule,
-  fetchFriendshipCapsules,
-  fetchFriendshipMessages,
+  fetchCapsuleMembers,
+  fetchCapsuleMessages,
   fetchMoment,
   fetchMoments,
-  fetchStarters,
-  markFriendshipRead,
   sendMessage,
 } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { Capsule, Message, Moment, Starter } from "@/types";
+import { Capsule, CapsuleMember, Message, Moment } from "@/types";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,6 +27,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -38,37 +36,26 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-type TabType = "all" | "capsules" | "moments";
+type TabType = "chat" | "photos";
 
 const TABS: { value: TabType; label: string }[] = [
-  { value: "all", label: "all" },
-  { value: "capsules", label: "capsules" },
-  { value: "moments", label: "moments" },
+  { value: "chat", label: "chat" },
+  { value: "photos", label: "photos" },
 ];
 
-export default function ChatScreen() {
-  const params = useLocalSearchParams<{
-    friendshipId: string;
-    friendId: string;
-    friendName: string;
-    friendAvatar?: string;
-  }>();
-  const friendshipId = params.friendshipId;
-  const friendId = params.friendId;
-  const friendName = params.friendName ?? "Friend";
-
+export default function CapsuleScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const { colors } = useTheme();
   const { userId } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<TabType>("all");
+  const [capsule, setCapsule] = useState<Capsule | null>(null);
+  const [members, setMembers] = useState<CapsuleMember[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [capsules, setCapsules] = useState<Capsule[]>([]);
   const [moments, setMoments] = useState<Moment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabType>("chat");
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
-  const [starters, setStarters] = useState<Starter[]>([]);
-  const [showStarters, setShowStarters] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [viewerMoment, setViewerMoment] = useState<Moment | null>(null);
 
   const momentsById = useMemo(() => {
@@ -76,43 +63,39 @@ export default function ChatScreen() {
     for (const moment of moments) map[moment.id] = moment;
     return map;
   }, [moments]);
-
-  const capsulesById = useMemo(() => {
-    const map: Record<string, Capsule> = {};
-    for (const capsule of capsules) map[capsule.id] = capsule;
-    return map;
-  }, [capsules]);
-
-  // Keep latest state available to the realtime handler without resubscribing.
   const momentsRef = useRef(momentsById);
   momentsRef.current = momentsById;
-  const capsulesRef = useRef(capsulesById);
-  capsulesRef.current = capsulesById;
+
+  const membersById = useMemo(() => {
+    const map: Record<string, CapsuleMember> = {};
+    for (const member of members) map[member.profileId] = member;
+    return map;
+  }, [members]);
 
   const load = useCallback(async () => {
-    if (!userId || !friendshipId) return;
+    if (!id || !userId) return;
     try {
-      const [messagesData, capsulesData, momentsData] = await Promise.all([
-        fetchFriendshipMessages(friendshipId),
-        fetchFriendshipCapsules(friendshipId),
-        fetchMoments({ friendshipId }),
+      const [capsuleData, membersData, messagesData, momentsData] = await Promise.all([
+        fetchCapsule(id),
+        fetchCapsuleMembers(id),
+        fetchCapsuleMessages(id),
+        fetchMoments({ capsuleId: id }),
       ]);
+      setCapsule(capsuleData);
+      setMembers(membersData);
       setMessages(messagesData);
-      setCapsules(capsulesData);
       setMoments(momentsData);
-      markFriendshipRead(friendshipId, friendId);
     } catch (error) {
-      console.error("Error loading chat:", error);
+      console.error("Error loading capsule:", error);
     } finally {
       setLoading(false);
     }
-  }, [userId, friendshipId, friendId]);
+  }, [id, userId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Refresh moments/capsules when returning from the create screens.
   useFocusEffect(
     useCallback(() => {
       if (!loading) load();
@@ -120,53 +103,27 @@ export default function ChatScreen() {
     }, [])
   );
 
-  // One realtime channel per open chat.
   useEffect(() => {
-    if (!userId || !friendshipId) return;
+    if (!id || !userId) return;
 
     const channel = supabase
-      .channel(`chat:${friendshipId}`)
+      .channel(`capsule:${id}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `friendship_id=eq.${friendshipId}`,
+          filter: `capsule_id=eq.${id}`,
         },
         async (payload) => {
           const message = payload.new as Message;
-          if (message.capsule_id) return; // capsule threads live on their own screen
-
           if (message.moment_id && !momentsRef.current[message.moment_id]) {
             const moment = await fetchMoment(message.moment_id);
             if (moment) setMoments((prev) => [moment, ...prev]);
           }
-          if (message.capsule_ref && !capsulesRef.current[message.capsule_ref]) {
-            const capsule = await fetchCapsule(message.capsule_ref);
-            if (capsule) setCapsules((prev) => [capsule, ...prev]);
-          }
-
           setMessages((prev) =>
             prev.some((m) => m.id === message.id) ? prev : [message, ...prev]
-          );
-          if (message.sender_id === friendId) {
-            markFriendshipRead(friendshipId, friendId);
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "capsules",
-          filter: `friendship_id=eq.${friendshipId}`,
-        },
-        (payload) => {
-          const capsule = payload.new as Capsule;
-          setCapsules((prev) =>
-            prev.some((c) => c.id === capsule.id) ? prev : [capsule, ...prev]
           );
         }
       )
@@ -175,16 +132,15 @@ export default function ChatScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId, friendshipId, friendId]);
+  }, [id, userId]);
 
   const handleSend = useCallback(async () => {
     const content = inputText.trim();
     if (!content || !userId || sending) return;
-
     setSending(true);
     setInputText("");
     try {
-      const message = await sendMessage({ senderId: userId, friendshipId, content });
+      const message = await sendMessage({ senderId: userId, capsuleId: id, content });
       setMessages((prev) =>
         prev.some((m) => m.id === message.id) ? prev : [message, ...prev]
       );
@@ -194,55 +150,43 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
     }
-  }, [inputText, userId, friendshipId, sending]);
+  }, [inputText, userId, id, sending]);
 
-  const openStarters = useCallback(async () => {
-    setShowStarters(true);
-    if (starters.length === 0) {
-      try {
-        setStarters(await fetchStarters());
-      } catch (error) {
-        console.error("Error loading starters:", error);
-      }
-    }
-  }, [starters.length]);
+  const shareInvite = useCallback(() => {
+    if (!capsule?.invite_code) return;
+    Share.share({
+      message: `Join my "${capsule.title}" capsule on Capsule! Open the app, tap "Join a capsule" and enter the code ${capsule.invite_code}.`,
+    });
+  }, [capsule]);
 
   const renderMessage = useCallback(
     ({ item }: { item: Message }) => {
       const isOwn = item.sender_id === userId;
+      const senderName = capsule?.is_group ? membersById[item.sender_id]?.name : undefined;
 
       if (item.moment_id && momentsById[item.moment_id]) {
         const moment = momentsById[item.moment_id];
         return (
-          <TouchableOpacity
-            style={[styles.momentMessage, isOwn ? styles.alignRight : styles.alignLeft]}
-            onPress={() => setViewerMoment(moment)}
-            activeOpacity={0.85}
-          >
-            <MomentCard
-              title={moment.title}
-              reflection={moment.reflection}
-              images={moment.photoUrls}
-            />
-          </TouchableOpacity>
-        );
-      }
-
-      if (item.capsule_ref && capsulesById[item.capsule_ref]) {
-        const capsule = capsulesById[item.capsule_ref];
-        return (
-          <View style={[styles.capsuleMessage, isOwn ? styles.alignRight : styles.alignLeft]}>
-            <CapsuleCard
-              capsule={capsule}
-              onPress={() => router.push({ pathname: "/capsule", params: { id: capsule.id } })}
-            />
+          <View style={isOwn ? styles.alignRight : styles.alignLeft}>
+            {!isOwn && senderName ? (
+              <Text style={[styles.momentSender, { color: colors.textSecondary }]}>
+                {senderName}
+              </Text>
+            ) : null}
+            <TouchableOpacity onPress={() => setViewerMoment(moment)} activeOpacity={0.85}>
+              <MomentCard
+                title={moment.title}
+                reflection={moment.reflection}
+                images={moment.photoUrls}
+              />
+            </TouchableOpacity>
           </View>
         );
       }
 
-      return <MessageBubble message={item} isOwn={isOwn} />;
+      return <MessageBubble message={item} isOwn={isOwn} senderName={senderName} />;
     },
-    [userId, momentsById, capsulesById]
+    [userId, momentsById, membersById, capsule?.is_group, colors.textSecondary]
   );
 
   const photoTiles = useMemo(
@@ -257,17 +201,21 @@ export default function ChatScreen() {
     [moments]
   );
 
-  if (loading) {
+  if (loading || !capsule) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        {loading ? (
+          <ActivityIndicator size="large" color={colors.primary} />
+        ) : (
+          <EmptyState icon="alert-circle-outline" title="Capsule not found" />
+        )}
       </View>
     );
   }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header: back · pills · avatar */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={[styles.backButton, { borderColor: colors.border }]}
@@ -275,18 +223,57 @@ export default function ChatScreen() {
         >
           <Ionicons name="chevron-back" size={22} color={colors.title} />
         </TouchableOpacity>
-        <FilterPills options={TABS} active={activeTab} onChange={setActiveTab} />
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: "/profile", params: { id: friendId } })}
-        >
-          <Avatar uri={params.friendAvatar} name={friendName} size={44} />
-        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerTitle, { color: colors.title }]} numberOfLines={1}>
+            {capsule.title}
+          </Text>
+          <View style={[styles.categoryChip, { borderColor: colors.primary }]}>
+            <Text style={[styles.categoryText, { color: colors.primary }]}>
+              {capsule.category}
+            </Text>
+          </View>
+        </View>
+        {capsule.is_group && capsule.invite_code ? (
+          <TouchableOpacity
+            style={[styles.inviteButton, { backgroundColor: colors.primary }]}
+            onPress={shareInvite}
+          >
+            <Ionicons name="share-outline" size={16} color="#fff" />
+            <Text style={styles.inviteCode}>{capsule.invite_code}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 44 }} />
+        )}
       </View>
 
-      {activeTab === "all" && (
+      {/* Members row (groups) */}
+      {capsule.is_group && members.length > 0 && (
+        <View style={styles.membersRow}>
+          {members.slice(0, 8).map((member) => (
+            <View key={member.profileId} style={styles.memberAvatar}>
+              <Avatar uri={member.avatar} name={member.name} size={34} shape="circle" />
+            </View>
+          ))}
+          <Text style={[styles.membersLabel, { color: colors.textSecondary }]}>
+            {members.length} member{members.length === 1 ? "" : "s"}
+          </Text>
+        </View>
+      )}
+
+      {capsule.description ? (
+        <Text style={[styles.description, { color: colors.textSecondary }]} numberOfLines={2}>
+          {capsule.description}
+        </Text>
+      ) : null}
+
+      <View style={styles.tabs}>
+        <FilterPills options={TABS} active={activeTab} onChange={setActiveTab} />
+      </View>
+
+      {activeTab === "chat" ? (
         <>
           <FlatList
-            key="chat-messages"
+            key="capsule-chat"
             data={messages}
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
@@ -297,13 +284,16 @@ export default function ChatScreen() {
               <View style={styles.invertedEmpty}>
                 <EmptyState
                   icon="chatbubble-outline"
-                  title={`Say hi to ${friendName}`}
-                  subtitle="Stuck for words? Tap the heart for a conversation starter."
+                  title="Start the conversation"
+                  subtitle={
+                    capsule.is_group
+                      ? "Everyone in this capsule can chat and add photos."
+                      : "Messages here stay inside this capsule."
+                  }
                 />
               </View>
             }
           />
-
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
             keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
@@ -312,7 +302,7 @@ export default function ChatScreen() {
               <View style={[styles.inputBubble, { backgroundColor: colors.backgroundSecondary }]}>
                 <TextInput
                   style={[styles.textInput, { color: colors.title }]}
-                  placeholder={`chat with ${friendName}...`}
+                  placeholder={`add to ${capsule.title}...`}
                   placeholderTextColor={colors.textSecondary}
                   value={inputText}
                   onChangeText={setInputText}
@@ -327,63 +317,18 @@ export default function ChatScreen() {
               <TouchableOpacity
                 style={styles.inputIcon}
                 onPress={() =>
-                  router.push({ pathname: "/share-moment", params: { friendshipId, friendId } })
+                  router.push({ pathname: "/share-moment", params: { capsuleId: capsule.id } })
                 }
               >
                 <Ionicons name="image-outline" size={26} color={colors.title} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.inputIcon} onPress={openStarters}>
-                <Ionicons name="heart-outline" size={26} color={colors.title} />
-              </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
         </>
-      )}
-
-      {activeTab === "capsules" && (
+      ) : (
         <>
           <FlatList
-            key="chat-capsules"
-            data={capsules}
-            keyExtractor={(item) => item.id}
-            numColumns={2}
-            columnWrapperStyle={styles.gridRow}
-            contentContainerStyle={styles.gridList}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <View style={styles.gridItem}>
-                <CapsuleCard
-                  capsule={item}
-                  onPress={() => router.push({ pathname: "/capsule", params: { id: item.id } })}
-                />
-              </View>
-            )}
-            ListEmptyComponent={
-              <EmptyState
-                icon="folder-open-outline"
-                title="No capsules yet"
-                subtitle={`Create a capsule to collect ideas, plans and memories with ${friendName}.`}
-              />
-            }
-          />
-          <View style={styles.footerCta}>
-            <OutlineButton
-              label="Create a Capsule"
-              onPress={() =>
-                router.push({
-                  pathname: "/create-capsule",
-                  params: { friendshipId, friendId, friendName },
-                })
-              }
-            />
-          </View>
-        </>
-      )}
-
-      {activeTab === "moments" && (
-        <>
-          <FlatList
-            key="chat-moments"
+            key="capsule-photos"
             data={photoTiles}
             keyExtractor={(item) => item.key}
             numColumns={2}
@@ -402,61 +347,25 @@ export default function ChatScreen() {
             ListEmptyComponent={
               <EmptyState
                 icon="images-outline"
-                title="No moments yet"
-                subtitle="Share photos of the moments you don't want to forget."
+                title="No photos yet"
+                subtitle={
+                  capsule.is_group
+                    ? "Share the invite code so everyone can add their photos here."
+                    : "Add the first photos to this capsule."
+                }
               />
             }
           />
           <View style={styles.footerCta}>
             <OutlineButton
-              label="Create a moment"
+              label="Add photos"
               onPress={() =>
-                router.push({ pathname: "/share-moment", params: { friendshipId, friendId } })
+                router.push({ pathname: "/share-moment", params: { capsuleId: capsule.id } })
               }
             />
           </View>
         </>
       )}
-
-      {/* Conversation starters */}
-      <Modal
-        visible={showStarters}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowStarters(false)}
-      >
-        <TouchableOpacity
-          style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
-          activeOpacity={1}
-          onPress={() => setShowStarters(false)}
-        >
-          <View style={[styles.startersSheet, { backgroundColor: colors.background }]}>
-            <Text style={[styles.startersTitle, { color: colors.title }]}>
-              Conversation starters
-            </Text>
-            <FlatList
-              data={starters}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.starterRow, { borderColor: colors.border }]}
-                  onPress={() => {
-                    setInputText(item.text);
-                    setShowStarters(false);
-                  }}
-                >
-                  <Text style={[styles.starterCategory, { color: colors.primary }]}>
-                    {item.category}
-                  </Text>
-                  <Text style={[styles.starterText, { color: colors.title }]}>{item.text}</Text>
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={<ActivityIndicator color={colors.primary} />}
-            />
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       {/* Full moment viewer */}
       <Modal
@@ -466,7 +375,7 @@ export default function ChatScreen() {
         onRequestClose={() => setViewerMoment(null)}
       >
         <TouchableOpacity
-          style={[styles.modalBackdrop, styles.viewerBackdrop, { backgroundColor: colors.overlay }]}
+          style={[styles.viewerBackdrop, { backgroundColor: colors.overlay }]}
           activeOpacity={1}
           onPress={() => setViewerMoment(null)}
         >
@@ -496,9 +405,9 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 10,
+    gap: 10,
   },
   backButton: {
     width: 44,
@@ -508,6 +417,62 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    gap: 4,
+  },
+  headerTitle: {
+    fontSize: 19,
+    fontWeight: "700",
+  },
+  categoryChip: {
+    borderWidth: 1.5,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+  },
+  categoryText: {
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  inviteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inviteCode: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  membersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    marginBottom: 6,
+  },
+  memberAvatar: {
+    marginRight: -8,
+  },
+  membersLabel: {
+    fontSize: 13,
+    marginLeft: 16,
+  },
+  description: {
+    fontSize: 14,
+    paddingHorizontal: 20,
+    marginBottom: 6,
+  },
+  tabs: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
   messagesList: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -515,18 +480,18 @@ const styles = StyleSheet.create({
   invertedEmpty: {
     transform: [{ scaleY: -1 }],
   },
-  momentMessage: {
-    marginBottom: 10,
-  },
-  capsuleMessage: {
-    marginBottom: 10,
-    width: "75%",
+  momentSender: {
+    fontSize: 12,
+    marginBottom: 2,
+    marginLeft: 6,
   },
   alignRight: {
     alignSelf: "flex-end",
+    marginBottom: 10,
   },
   alignLeft: {
     alignSelf: "flex-start",
+    marginBottom: 10,
   },
   inputRow: {
     flexDirection: "row",
@@ -574,40 +539,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
   viewerBackdrop: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-  },
-  startersSheet: {
-    maxHeight: "70%",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-  },
-  startersTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    marginBottom: 16,
-  },
-  starterRow: {
-    borderWidth: 1.5,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 10,
-  },
-  starterCategory: {
-    fontSize: 12,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  starterText: {
-    fontSize: 15,
-    lineHeight: 21,
   },
 });
