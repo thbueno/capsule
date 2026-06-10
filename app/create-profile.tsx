@@ -1,12 +1,17 @@
+import { PrimaryButton } from "@/components/Buttons";
+import { useTheme } from "@/context/ThemeProvider";
+import { pickImages, uploadImage } from "@/lib/images";
+import { supabase } from "@/lib/supabase";
+import { PickedImage } from "@/types";
 import { Ionicons } from "@expo/vector-icons";
-import { decode } from "base64-arraybuffer";
-import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,240 +19,122 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { supabase } from "../lib/supabase";
 
 export default function CreateProfile() {
+  const { colors } = useTheme();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [username, setUsername] = useState("");
   const [handle, setHandle] = useState("");
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [avatar, setAvatar] = useState<PickedImage | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      allowsEditing: true,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      setImageUri(result.assets[0].uri);
-    }
-  };
-
-  const uploadAvatar = async (userId: string): Promise<string | null> => {
-    const permissionResult =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert("Permission denied", "Camera roll permission is required.");
-      return null;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: Platform.OS === "web" ? 0.5 : 0.8,
-      base64: true,
-      allowsEditing: true,
-    });
-
-    console.log("📷 Picker result:", result);
-
-    if (result.canceled || !result.assets?.[0]) {
-      Alert.alert("Cancelled", "Image selection was cancelled.");
-      return null;
-    }
-
-    const image = result.assets[0];
-
-    let fileExt = "jpg";
-    if (image.type) {
-      fileExt = image.type.split("/")[1] || "jpg";
-      if (fileExt === "jpeg") fileExt = "jpg";
-    }
-
-    const filePath = `${userId}.${fileExt}`;
-    const bucket = "profile-pictures";
-
-    let fileToUpload;
-
-    if (Platform.OS === "web") {
-      const response = await fetch(image.uri);
-      fileToUpload = await response.blob();
-    } else {
-      const base64 = image.base64!;
-      const fileBuffer = decode(base64); // This gives us an ArrayBuffer
-      fileToUpload = fileBuffer;
-    }
-
-    const { data, error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(filePath, fileToUpload, {
-        contentType: image.type || "image/jpeg",
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error("❌ Upload error:", uploadError);
-      Alert.alert("Upload failed", uploadError.message);
-      return null;
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
-
-    const publicUrl = publicUrlData?.publicUrl ?? null;
-    console.log("✅ Uploaded avatar URL:", publicUrl);
-    return publicUrl;
+  const pickAvatar = async () => {
+    const [image] = await pickImages(1);
+    if (image) setAvatar(image);
   };
 
   const handleCreateProfile = async () => {
+    if (!username.trim()) {
+      Alert.alert("Missing info", "Pick a username.");
+      return;
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
-
     if (!user) {
       Alert.alert("Not logged in");
       return;
     }
 
     setLoading(true);
+    try {
+      let avatarUrl: string | null = null;
+      if (avatar) {
+        const path = await uploadImage("profile-pictures", user.id, avatar, {
+          upsert: true,
+          fileName: "avatar.jpg",
+        });
+        const { data } = supabase.storage.from("profile-pictures").getPublicUrl(path);
+        // Cache-bust so a replaced avatar shows up immediately.
+        avatarUrl = data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
+      }
 
-    let avatarUrl: string | null = null;
-    if (imageUri) {
-      avatarUrl = await uploadAvatar(user.id);
-    }
-
-    const { error } = await supabase.from("profiles").insert([
-      {
+      const { error } = await supabase.from("profiles").insert({
         id: user.id,
-        first_name: firstName,
-        last_name: lastName,
-        username,
-        handle,
+        first_name: firstName.trim() || null,
+        last_name: lastName.trim() || null,
+        username: username.trim(),
+        handle: handle.trim().replace(/^@/, "") || null,
         avatar_url: avatarUrl,
-      },
-    ]);
+      });
+      if (error) throw error;
 
-    setLoading(false);
-
-    if (error) {
-      Alert.alert("Error", error.message);
-    } else {
-      router.replace("/" as any);
+      router.replace("/");
+    } catch (error: any) {
+      Alert.alert("Error", error.message ?? "Could not create profile");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Status Bar Area */}
-      <View style={styles.statusBar}>
-        <View style={styles.dynamicIsland} />
-      </View>
-
-      {/* Progress Bar */}
-      <View style={styles.progressContainer}>
-        <View style={[styles.progressStep, styles.progressStepActive]} />
-        <View style={[styles.progressStep, styles.progressStepActive]} />
-        <View style={styles.progressStep} />
-        <View style={styles.progressStep} />
-      </View>
-
-      {/* Navigation Header */}
-      <View style={styles.navigationHeader}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Ionicons name="chevron-back" size={16} color="#6B6B6B" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Page Title */}
-      <Text style={styles.pageTitle}>Create Profile</Text>
-
-      {/* Avatar Section */}
-      <View style={styles.avatarContainer}>
-        <TouchableOpacity style={styles.avatarCircle} onPress={pickImage}>
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.avatarImage} />
-          ) : (
-            <Ionicons name="person-outline" size={48} color="#D4A574" />
-          )}
-          <View style={styles.editButton}>
-            <Ionicons name="pencil" size={18} color="#FFFFFF" />
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* Form Fields */}
-      <View style={styles.formContainer}>
-        <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>First Name</Text>
-          <TextInput
-            value={firstName}
-            onChangeText={setFirstName}
-            placeholder="Enter your first name"
-            placeholderTextColor="#A8A8A8"
-            style={styles.fieldInput}
-          />
-        </View>
-
-        <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>Last Name</Text>
-          <TextInput
-            value={lastName}
-            onChangeText={setLastName}
-            placeholder="Enter your last name"
-            placeholderTextColor="#A8A8A8"
-            style={styles.fieldInput}
-          />
-        </View>
-
-        <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>Username</Text>
-          <TextInput
-            value={username}
-            onChangeText={setUsername}
-            placeholder="your username"
-            placeholderTextColor="#A8A8A8"
-            style={styles.fieldInput}
-            autoCapitalize="none"
-          />
-        </View>
-
-        <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>Handle</Text>
-          <TextInput
-            value={handle}
-            onChangeText={setHandle}
-            placeholder="@yourname"
-            placeholderTextColor="#A8A8A8"
-            style={styles.fieldInput}
-            autoCapitalize="none"
-          />
-        </View>
-      </View>
-
-      {/* Spacer to push button to bottom */}
-      <View style={styles.spacer} />
-
-      {/* Primary Button */}
-      <TouchableOpacity
-        style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
-        onPress={handleCreateProfile}
-        disabled={loading}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
       >
-        <Text style={styles.primaryButtonText}>
-          {loading ? "Creating..." : "save changes"}
-        </Text>
-      </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.content}>
+          <Text style={[styles.title, { color: colors.title }]}>Create Profile</Text>
 
-      {/* Link Text */}
-      <TouchableOpacity onPress={() => router.replace("/login")}>
-        <Text style={styles.linkText}>Already have an account? Log in</Text>
-      </TouchableOpacity>
+          <View style={styles.avatarContainer}>
+            <TouchableOpacity
+              style={[styles.avatarCircle, { borderColor: colors.primary }]}
+              onPress={pickAvatar}
+            >
+              {avatar ? (
+                <Image source={{ uri: avatar.uri }} style={styles.avatarImage} />
+              ) : (
+                <Ionicons name="person-outline" size={48} color={colors.primary} />
+              )}
+              <View style={[styles.editBadge, { backgroundColor: colors.title }]}>
+                <Ionicons name="pencil" size={16} color={colors.background} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {(
+            [
+              { label: "First Name", value: firstName, set: setFirstName, placeholder: "Enter your first name" },
+              { label: "Last Name", value: lastName, set: setLastName, placeholder: "Enter your last name" },
+              { label: "Username", value: username, set: setUsername, placeholder: "your username" },
+              { label: "Handle", value: handle, set: setHandle, placeholder: "@yourname" },
+            ] as const
+          ).map((field) => (
+            <View key={field.label} style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>{field.label}</Text>
+              <TextInput
+                value={field.value}
+                onChangeText={field.set}
+                placeholder={field.placeholder}
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize={
+                  field.label === "Username" || field.label === "Handle" ? "none" : "words"
+                }
+                style={[styles.input, { borderColor: colors.border, color: colors.title }]}
+              />
+            </View>
+          ))}
+
+          <PrimaryButton
+            label="Save profile"
+            onPress={handleCreateProfile}
+            loading={loading}
+            style={{ marginTop: 12 }}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -255,154 +142,59 @@ export default function CreateProfile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F2E8", // Primary background from design system
-    width: "100%",
-    minHeight: "100%",
   },
-  statusBar: {
-    height: 44,
-    backgroundColor: "transparent",
-    position: "relative",
-    alignItems: "center",
-    justifyContent: "center",
+  content: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
-  dynamicIsland: {
-    width: 126,
-    height: 37,
-    backgroundColor: "#000000",
-    borderRadius: 19,
-    position: "absolute",
-    top: 8,
-  },
-  progressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 20,
-    marginTop: 16,
-  },
-  progressStep: {
-    height: 4,
-    flex: 1,
-    borderRadius: 2,
-    backgroundColor: "#E8E5DD", // Pale gray from design system
-  },
-  progressStepActive: {
-    backgroundColor: "#FF4D36", // Orange accent from design system
-  },
-  navigationHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    marginTop: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    backgroundColor: "transparent",
-    borderWidth: 2,
-    borderColor: "#E8E5DD",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pageTitle: {
+  title: {
     fontSize: 28,
     fontWeight: "600",
-    lineHeight: 33.6, // 1.2 line height
-    letterSpacing: -0.56, // -0.02em
-    color: "#2D2D2D", // Primary text color
     textAlign: "center",
-    marginTop: 32,
-    marginBottom: 48,
-    marginHorizontal: 20,
+    marginTop: 24,
+    marginBottom: 32,
   },
   avatarContainer: {
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 48,
+    marginBottom: 32,
   },
   avatarCircle: {
     width: 120,
     height: 120,
-    backgroundColor: "transparent",
     borderWidth: 3,
-    borderColor: "#D4A574", // Accent gold color
     borderRadius: 60,
     alignItems: "center",
     justifyContent: "center",
-    position: "relative",
   },
   avatarImage: {
-    width: 114, // Slightly smaller to account for border
-    height: 114,
-    borderRadius: 57,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
   },
-  editButton: {
-    width: 36,
-    height: 36,
-    backgroundColor: "#2D2D2D",
-    borderRadius: 18,
+  editBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     position: "absolute",
     bottom: 0,
     right: 0,
     alignItems: "center",
     justifyContent: "center",
   },
-  formContainer: {
-    paddingHorizontal: 20,
+  fieldGroup: {
+    marginBottom: 20,
   },
-  fieldContainer: {
-    marginBottom: 32,
-  },
-  fieldLabel: {
+  label: {
     fontSize: 14,
     fontWeight: "500",
-    lineHeight: 19.6, // 1.4 line height
-    color: "#D4A574", // Accent gold color
-    marginBottom: 12,
+    marginBottom: 8,
   },
-  fieldInput: {
-    width: "100%",
-    height: 56,
-    backgroundColor: "transparent",
-    borderWidth: 2,
-    borderColor: "#E8E5DD",
-    borderRadius: 12,
+  input: {
+    borderWidth: 1.5,
+    borderRadius: 14,
     paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
-    fontWeight: "400",
-    color: "#2D2D2D",
-  },
-  spacer: {
-    flex: 1,
-  },
-  primaryButton: {
-    height: 56,
-    backgroundColor: "#FF4D36", // Orange accent
-    borderRadius: 12,
-    marginHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 24,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#FFFFFF",
-    letterSpacing: 0.32, // 0.02em
-  },
-  linkText: {
-    fontSize: 16,
-    fontWeight: "400",
-    lineHeight: 24, // 1.5 line height
-    color: "#D4A574", // Accent gold color
-    textAlign: "center",
-    marginHorizontal: 20,
-    marginBottom: 32,
+    minHeight: 52,
   },
 });

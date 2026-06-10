@@ -23,14 +23,16 @@ Most messaging apps optimise for volume and speed — a stream of ephemeral noti
 
 Capsule is a mobile-first social platform built for **depth over breadth**. It limits the social graph to confirmed friends and introduces three distinct communication primitives: **text messages** for everyday back-and-forth, **moments** for sharing photo memories with a short reflection, and **capsules** — named, typed containers that group related messages and media into a persistent, revisitable thread (recipes shared between cooking partners, travel plans, a running list of book recommendations). Conversation starters surface prompts across six emotional categories to help friends move past "hey, what's up?" when they don't know where to begin.
 
+In addition to 1-to-1 friendships, **group capsules** open a single capsule up to many people via a 6-character invite code — e.g. a wedding capsule that every guest drops their photos into, so they all end up in one place. This supersedes [ADR-004](#adr-004-1-to-1-friendship-scope-no-group-chats).
+
 ### What this is NOT
 
-- Not a broadcast social network — there are no followers, feeds, or public profiles. Every interaction is 1-to-1.
-- Not a group chat app — capsules are friendship-scoped, not multi-party rooms. See [ADR-004](#adr-004-1-to-1-friendship-scope-no-group-chats) for the reasoning.
+- Not a broadcast social network — there are no followers, feeds, or public profiles.
+- Not a general group chat app — group capsules are purpose-scoped containers (an event, a trip), not open-ended rooms.
 - Not a photo-sharing platform — moments are secondary artifacts attached to a relationship, not the primary content unit.
 - Not designed for high-frequency ephemeral communication — for that, use iMessage or WhatsApp.
 
-**Current state:** Prototype / take-home assessment maturity. Core flows (auth, friendship, messaging, moments, capsules) are functional end-to-end on iOS, Android, and web. No CI pipeline, no automated tests, and no production deployment exist yet.
+**Current state:** Prototype maturity. Core flows (auth, friendship, messaging, moments, capsules, group capsules with invite codes) are functional end-to-end on iOS, Android, and web. No CI pipeline, no automated tests, and no production deployment exist yet.
 
 ---
 
@@ -231,17 +233,17 @@ To confirm the app is running correctly: the splash screen should appear, follow
 
 ### Supabase Project Setup
 
-The app requires the following Supabase resources provisioned in your project:
+Run [`supabase/schema.sql`](supabase/schema.sql) in the SQL editor of a fresh Supabase project — it provisions everything in one shot. See [`supabase/README.md`](supabase/README.md) for the step-by-step guide.
 
-**Tables:** `profiles`, `friendships`, `messages`, `capsules`, `shared_photos`, `starters`
+**Tables:** `profiles`, `friendships`, `capsules`, `capsule_members`, `moments`, `moment_photos`, `messages`, `starters`
 
 **Storage buckets:**
-- `profile-pictures` — public read, authenticated write
-- `shared-photos` — authenticated read via signed URLs, authenticated write
+- `profile-pictures` — public read, owner-folder write
+- `shared-photos` — private; reads via signed URLs gated by moment visibility
 
-**Row Level Security:** Enable RLS on all tables. Access to messages, capsules, and shared_photos must be restricted to rows where the requesting user participates in the associated `friendships` record with status `accepted`.
+**Row Level Security:** enabled on every table by the schema script. Access is membership-based (`is_friendship_participant` / `is_capsule_member` security-definer helpers), and group capsules are joined via the `join_capsule(code)` RPC.
 
-**Starters seed data:** The `starters` table should be pre-populated with conversation prompts. Categories: `memories`, `fun`, `future`, `curiosity`, `challenges`, `appreciation`.
+**Starters seed data:** included in the schema script. Categories: `memories`, `fun`, `future`, `curiosity`, `challenges`, `appreciation`.
 
 ---
 
@@ -507,7 +509,7 @@ Significant architectural decisions are documented below.
 | [ADR-001](#adr-001-supabase-baas-over-custom-backend) | Supabase BaaS over custom backend server | ✅ Accepted | 2025-05 |
 | [ADR-002](#adr-002-expo-router-over-bare-react-navigation) | Expo Router over bare React Navigation | ✅ Accepted | 2025-05 |
 | [ADR-003](#adr-003-react-context-over-external-state-library) | React Context over Redux / Zustand | ✅ Accepted | 2025-05 |
-| [ADR-004](#adr-004-1-to-1-friendship-scope-no-group-chats) | 1-to-1 friendship scope — no group chats | ✅ Accepted | 2025-05 |
+| [ADR-004](#adr-004-1-to-1-friendship-scope-no-group-chats) | 1-to-1 friendship scope — no group chats | 🔁 Superseded (group capsules via `capsule_members` + invite codes, 2026-06) | 2025-05 |
 
 **Status legend:** ✅ Accepted · 🔶 Proposed · 🔁 Superseded · ⛔ Deprecated · ❌ Rejected
 
@@ -576,7 +578,7 @@ Significant architectural decisions are documented below.
 
 ### ADR-004: 1-to-1 friendship scope — no group chats
 
-**Date:** 2025-05 · **Status:** Accepted
+**Date:** 2025-05 · **Status:** Superseded (2026-06) — group capsules were added with a `capsule_members` join table and invite-code joining via the `join_capsule` RPC, exactly the "known future cost" accepted below. Messages and moments now scope to either a friendship or a capsule.
 
 **Context:** Capsule is designed for intimate communication between close friends. The data model centres on a `friendships` record between exactly two users. Group conversation is a common expectation in social apps but conflicts with the product's focus on depth.
 

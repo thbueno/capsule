@@ -1,87 +1,58 @@
-import { ThemeProvider } from "@/context/ThemeProvider"; // adjust path
-import { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { ThemeProvider, useTheme } from "@/context/ThemeProvider";
+import { supabase } from "@/lib/supabase";
+import { Session } from "@supabase/supabase-js";
 import { router, Stack, usePathname } from "expo-router";
-import { useEffect, useState } from "react";
-import { Text, View } from "react-native";
-import { supabase } from "../lib/supabase";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, View } from "react-native";
 
-export default function Layout() {
-  const [loading, setLoading] = useState(true);
+const PUBLIC_ROUTES = ["/login", "/signup"];
+
+function AuthGate() {
+  const { colors } = useTheme();
+  const [checking, setChecking] = useState(true);
   const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
 
   useEffect(() => {
     let mounted = true;
 
-    const handleAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!mounted) return;
+    const routeForSession = async (session: Session | null) => {
+      const isPublic = PUBLIC_ROUTES.includes(pathnameRef.current);
 
-        const isPublicRoute = ["/login", "/signup"].includes(pathname);
-        
-        // Not logged in - redirect to login (unless already there)
-        if (!session) {
-          if (!isPublicRoute) {
-            router.replace("/login");
-          }
-          setLoading(false);
-          return;
-        }
-
-        // Logged in on public route - check profile and redirect
-        if (isPublicRoute) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("id")
-            .eq("id", session.user.id)
-            .maybeSingle();
-
-          if (!mounted) return;
-
-          if (profile) {
-            router.replace("/");
-          } else {
-            router.replace("/create-profile");
-          }
-          return;
-        }
-
-        // Logged in on protected route - just stop loading
-        setLoading(false);
-
-      } catch (error) {
-        console.error("Auth error:", error);
-        if (mounted) setLoading(false);
-      }
-    };
-
-    handleAuth();
-
-    // Listen for auth changes
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    async (event: AuthChangeEvent, session: Session | null) => {
-      if (!mounted) return;
-
-      if (event === 'SIGNED_OUT') {
-        router.replace("/login");
+      if (!session) {
+        if (!isPublic) router.replace("/login");
+        if (mounted) setChecking(false);
         return;
       }
 
-      if (event === 'SIGNED_IN' && session) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("id", session.user.id)
-          .maybeSingle();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (!mounted) return;
 
-        if (!mounted) return;
+      if (!profile) {
+        if (pathnameRef.current !== "/create-profile") router.replace("/create-profile");
+      } else if (isPublic || pathnameRef.current === "/create-profile") {
+        router.replace("/");
+      }
+      setChecking(false);
+    };
 
-        if (profile) {
-          router.replace("/");
-        } else {
-          router.replace("/create-profile");
-        }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (mounted) routeForSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if (event === "SIGNED_OUT") {
+        router.replace("/login");
+      } else if (event === "SIGNED_IN") {
+        routeForSession(session);
       }
     });
 
@@ -89,19 +60,37 @@ export default function Layout() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [pathname]);
+  }, []);
 
-  if (loading) {
+  if (checking) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <Text>Loading...</Text>
+      <View
+        style={{
+          flex: 1,
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: colors.background,
+        }}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    />
+  );
+}
+
+export default function Layout() {
+  return (
     <ThemeProvider>
-      <Stack />
+      <AuthGate />
     </ThemeProvider>
   );
 }
