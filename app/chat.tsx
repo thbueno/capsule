@@ -286,6 +286,7 @@ export default function ChatScreen() {
       {activeTab === "all" && (
         <>
           <FlatList
+            key="chat-messages"
             data={messages}
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
@@ -342,6 +343,7 @@ export default function ChatScreen() {
       {activeTab === "capsules" && (
         <>
           <FlatList
+            key="chat-capsules"
             data={capsules}
             keyExtractor={(item) => item.id}
             numColumns={2}
@@ -381,6 +383,7 @@ export default function ChatScreen() {
       {activeTab === "moments" && (
         <>
           <FlatList
+            key="chat-moments"
             data={photoTiles}
             keyExtractor={(item) => item.key}
             numColumns={2}

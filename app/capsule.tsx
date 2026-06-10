@@ -273,6 +273,7 @@ export default function CapsuleScreen() {
       {activeTab === "chat" ? (
         <>
           <FlatList
+            key="capsule-chat"
             data={messages}
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
@@ -327,6 +328,7 @@ export default function CapsuleScreen() {
       ) : (
         <>
           <FlatList
+            key="capsule-photos"
             data={photoTiles}
             keyExtractor={(item) => item.key}
             numColumns={2}
