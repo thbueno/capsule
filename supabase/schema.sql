@@ -1,8 +1,11 @@
 -- ============================================================================
 -- Capsule — full database schema
--- Run this in the Supabase SQL editor of a fresh project (Dashboard → SQL).
--- It creates all tables, row level security policies, storage buckets,
--- realtime publications and seed data the app needs.
+-- Run this in the Supabase SQL editor (Dashboard → SQL → New query).
+--
+-- The script is IDEMPOTENT: it is safe to run repeatedly, including over a
+-- database where the tables already exist — policies, functions and triggers
+-- are dropped/replaced each run. If a previous run failed partway (the SQL
+-- editor rolls back the whole run on error), just run this again.
 -- ============================================================================
 
 create extension if not exists pgcrypto;
@@ -12,7 +15,7 @@ create extension if not exists pgcrypto;
 -- ----------------------------------------------------------------------------
 
 -- One row per auth user.
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   username text not null,
   handle text unique,
@@ -23,7 +26,7 @@ create table public.profiles (
 );
 
 -- A friend request / friendship between exactly two users.
-create table public.friendships (
+create table if not exists public.friendships (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
   friend_id uuid not null references public.profiles (id) on delete cascade,
@@ -38,7 +41,7 @@ create table public.friendships (
 --   * friendship capsule: lives inside a 1-to-1 chat (friendship_id set)
 --   * group capsule:      is_group = true, joinable by invite_code
 --     (e.g. a wedding where every guest adds their photos)
-create table public.capsules (
+create table if not exists public.capsules (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   description text,
@@ -56,7 +59,7 @@ create table public.capsules (
 
 -- Membership of a capsule. Filled automatically for friendship capsules,
 -- grown via invite code for group capsules.
-create table public.capsule_members (
+create table if not exists public.capsule_members (
   capsule_id uuid not null references public.capsules (id) on delete cascade,
   profile_id uuid not null references public.profiles (id) on delete cascade,
   role text not null default 'member' check (role in ('owner', 'member')),
@@ -66,7 +69,7 @@ create table public.capsule_members (
 
 -- A moment is a photo post (1..5 photos) with a title and reflection,
 -- shared either into a friendship or into a capsule.
-create table public.moments (
+create table if not exists public.moments (
   id uuid primary key default gen_random_uuid(),
   uploader_id uuid not null references public.profiles (id) on delete cascade,
   friendship_id uuid references public.friendships (id) on delete cascade,
@@ -79,7 +82,7 @@ create table public.moments (
 
 -- Individual photos belonging to a moment. storage_path is the object path
 -- inside the private "shared-photos" bucket (no bucket prefix).
-create table public.moment_photos (
+create table if not exists public.moment_photos (
   id uuid primary key default gen_random_uuid(),
   moment_id uuid not null references public.moments (id) on delete cascade,
   storage_path text not null,
@@ -89,7 +92,7 @@ create table public.moment_photos (
 -- Chat messages. Scoped either to a friendship (1-to-1 chat) or a capsule
 -- (capsule thread, incl. group capsules). moment_id attaches a photo moment;
 -- capsule_ref renders an inline "capsule card" in the chat.
-create table public.messages (
+create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   sender_id uuid not null references public.profiles (id) on delete cascade,
   friendship_id uuid references public.friendships (id) on delete cascade,
@@ -103,7 +106,7 @@ create table public.messages (
 );
 
 -- Conversation starter prompts.
-create table public.starters (
+create table if not exists public.starters (
   id uuid primary key default gen_random_uuid(),
   text text not null,
   category text not null
@@ -111,15 +114,15 @@ create table public.starters (
 );
 
 -- Indexes for the hot query paths.
-create index friendships_user_idx on public.friendships (user_id, status);
-create index friendships_friend_idx on public.friendships (friend_id, status);
-create index capsules_friendship_idx on public.capsules (friendship_id);
-create index capsule_members_profile_idx on public.capsule_members (profile_id);
-create index moments_friendship_idx on public.moments (friendship_id, created_at desc);
-create index moments_capsule_idx on public.moments (capsule_id, created_at desc);
-create index moment_photos_moment_idx on public.moment_photos (moment_id, position);
-create index messages_friendship_idx on public.messages (friendship_id, created_at desc);
-create index messages_capsule_idx on public.messages (capsule_id, created_at desc);
+create index if not exists friendships_user_idx on public.friendships (user_id, status);
+create index if not exists friendships_friend_idx on public.friendships (friend_id, status);
+create index if not exists capsules_friendship_idx on public.capsules (friendship_id);
+create index if not exists capsule_members_profile_idx on public.capsule_members (profile_id);
+create index if not exists moments_friendship_idx on public.moments (friendship_id, created_at desc);
+create index if not exists moments_capsule_idx on public.moments (capsule_id, created_at desc);
+create index if not exists moment_photos_moment_idx on public.moment_photos (moment_id, position);
+create index if not exists messages_friendship_idx on public.messages (friendship_id, created_at desc);
+create index if not exists messages_capsule_idx on public.messages (capsule_id, created_at desc);
 
 -- ----------------------------------------------------------------------------
 -- HELPER FUNCTIONS (security definer so RLS policies don't recurse)
@@ -181,6 +184,7 @@ begin
 end;
 $$;
 
+drop trigger if exists capsules_invite_code on public.capsules;
 create trigger capsules_invite_code
   before insert on public.capsules
   for each row execute function public.capsules_set_invite_code();
@@ -212,6 +216,7 @@ begin
 end;
 $$;
 
+drop trigger if exists capsules_members on public.capsules;
 create trigger capsules_members
   after insert on public.capsules
   for each row execute function public.capsules_seed_members();
@@ -229,10 +234,12 @@ begin
 end;
 $$;
 
+drop trigger if exists messages_touch_capsule on public.messages;
 create trigger messages_touch_capsule
   after insert on public.messages
   for each row execute function public.touch_capsule_activity();
 
+drop trigger if exists moments_touch_capsule on public.moments;
 create trigger moments_touch_capsule
   after insert on public.moments
   for each row execute function public.touch_capsule_activity();
@@ -279,52 +286,68 @@ alter table public.starters enable row level security;
 
 -- profiles: readable by any signed-in user (needed for friend search),
 -- writable only by the owner.
+drop policy if exists "profiles_select" on public.profiles;
 create policy "profiles_select" on public.profiles
   for select to authenticated using (true);
+drop policy if exists "profiles_insert" on public.profiles;
 create policy "profiles_insert" on public.profiles
   for insert to authenticated with check (id = auth.uid());
+drop policy if exists "profiles_update" on public.profiles;
 create policy "profiles_update" on public.profiles
   for update to authenticated using (id = auth.uid());
 
 -- friendships: only participants can see them; anyone can send a request as
--- themselves; the recipient (or either side) can update the status.
+-- themselves; either side can update the status (accept / block).
+drop policy if exists "friendships_select" on public.friendships;
 create policy "friendships_select" on public.friendships
   for select to authenticated
   using (user_id = auth.uid() or friend_id = auth.uid());
+drop policy if exists "friendships_insert" on public.friendships;
 create policy "friendships_insert" on public.friendships
   for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists "friendships_update" on public.friendships;
 create policy "friendships_update" on public.friendships
   for update to authenticated
   using (user_id = auth.uid() or friend_id = auth.uid());
+drop policy if exists "friendships_delete" on public.friendships;
 create policy "friendships_delete" on public.friendships
   for delete to authenticated
   using (user_id = auth.uid() or friend_id = auth.uid());
 
--- capsules: members only. Creation requires you to be the creator and, for
--- friendship capsules, a participant of that friendship.
+-- capsules: visible to members and to the creator. (The creator check also
+-- makes INSERT ... RETURNING work — membership is added by an AFTER trigger,
+-- which runs too late for the returned row's SELECT policy check.)
+drop policy if exists "capsules_select" on public.capsules;
 create policy "capsules_select" on public.capsules
-  for select to authenticated using (public.is_capsule_member(id));
+  for select to authenticated
+  using (created_by = auth.uid() or public.is_capsule_member(id));
+drop policy if exists "capsules_insert" on public.capsules;
 create policy "capsules_insert" on public.capsules
   for insert to authenticated
   with check (
     created_by = auth.uid()
     and (friendship_id is null or public.is_friendship_participant(friendship_id))
   );
+drop policy if exists "capsules_update" on public.capsules;
 create policy "capsules_update" on public.capsules
   for update to authenticated using (public.is_capsule_member(id));
+drop policy if exists "capsules_delete" on public.capsules;
 create policy "capsules_delete" on public.capsules
   for delete to authenticated using (created_by = auth.uid());
 
 -- capsule_members: members can see the roster. Direct inserts are limited to
 -- triggers / the join_capsule RPC (both run as security definer), so no
 -- insert policy is granted here.
+drop policy if exists "capsule_members_select" on public.capsule_members;
 create policy "capsule_members_select" on public.capsule_members
   for select to authenticated
   using (profile_id = auth.uid() or public.is_capsule_member(capsule_id));
+drop policy if exists "capsule_members_delete" on public.capsule_members;
 create policy "capsule_members_delete" on public.capsule_members
   for delete to authenticated using (profile_id = auth.uid());
 
 -- moments: visible inside the friendship or capsule they belong to.
+drop policy if exists "moments_select" on public.moments;
 create policy "moments_select" on public.moments
   for select to authenticated
   using (
@@ -332,6 +355,7 @@ create policy "moments_select" on public.moments
     or (friendship_id is not null and public.is_friendship_participant(friendship_id))
     or (capsule_id is not null and public.is_capsule_member(capsule_id))
   );
+drop policy if exists "moments_insert" on public.moments;
 create policy "moments_insert" on public.moments
   for insert to authenticated
   with check (
@@ -339,17 +363,21 @@ create policy "moments_insert" on public.moments
     and (friendship_id is null or public.is_friendship_participant(friendship_id))
     and (capsule_id is null or public.is_capsule_member(capsule_id))
   );
+drop policy if exists "moments_delete" on public.moments;
 create policy "moments_delete" on public.moments
   for delete to authenticated using (uploader_id = auth.uid());
 
 -- moment_photos follow their parent moment.
+drop policy if exists "moment_photos_select" on public.moment_photos;
 create policy "moment_photos_select" on public.moment_photos
   for select to authenticated using (public.can_view_moment(moment_id));
+drop policy if exists "moment_photos_insert" on public.moment_photos;
 create policy "moment_photos_insert" on public.moment_photos
   for insert to authenticated
   with check (
     exists (select 1 from public.moments m where m.id = moment_id and m.uploader_id = auth.uid())
   );
+drop policy if exists "moment_photos_delete" on public.moment_photos;
 create policy "moment_photos_delete" on public.moment_photos
   for delete to authenticated
   using (
@@ -358,12 +386,14 @@ create policy "moment_photos_delete" on public.moment_photos
 
 -- messages: scoped to the friendship / capsule. Participants may update
 -- (used to mark messages as read).
+drop policy if exists "messages_select" on public.messages;
 create policy "messages_select" on public.messages
   for select to authenticated
   using (
     (friendship_id is not null and public.is_friendship_participant(friendship_id))
     or (capsule_id is not null and public.is_capsule_member(capsule_id))
   );
+drop policy if exists "messages_insert" on public.messages;
 create policy "messages_insert" on public.messages
   for insert to authenticated
   with check (
@@ -371,6 +401,7 @@ create policy "messages_insert" on public.messages
     and (friendship_id is null or public.is_friendship_participant(friendship_id))
     and (capsule_id is null or public.is_capsule_member(capsule_id))
   );
+drop policy if exists "messages_update" on public.messages;
 create policy "messages_update" on public.messages
   for update to authenticated
   using (
@@ -379,16 +410,25 @@ create policy "messages_update" on public.messages
   );
 
 -- starters: read-only reference data.
+drop policy if exists "starters_select" on public.starters;
 create policy "starters_select" on public.starters
   for select to authenticated using (true);
 
 -- ----------------------------------------------------------------------------
--- REALTIME
+-- REALTIME (each wrapped so re-runs don't abort on "already in publication")
 -- ----------------------------------------------------------------------------
 
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.capsules;
-alter publication supabase_realtime add table public.moments;
+do $$ begin
+  alter publication supabase_realtime add table public.messages;
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.capsules;
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.moments;
+exception when duplicate_object then null; end $$;
 
 -- ----------------------------------------------------------------------------
 -- STORAGE
@@ -402,48 +442,67 @@ insert into storage.buckets (id, name, public)
 values ('shared-photos', 'shared-photos', false)
 on conflict (id) do nothing;
 
--- Avatars: world-readable, each user writes only inside their own folder.
-create policy "avatars_read" on storage.objects
-  for select using (bucket_id = 'profile-pictures');
-create policy "avatars_write" on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'profile-pictures'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-create policy "avatars_update" on storage.objects
-  for update to authenticated
-  using (
-    bucket_id = 'profile-pictures'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
+-- Storage policies. On some Supabase projects the SQL editor role isn't the
+-- owner of storage.objects, in which case policy DDL here fails — the block
+-- below catches that and tells you to add them via the dashboard instead of
+-- aborting (and rolling back!) the rest of this script.
+do $$
+begin
+  -- Avatars: world-readable, each user writes only inside their own folder.
+  drop policy if exists "avatars_read" on storage.objects;
+  create policy "avatars_read" on storage.objects
+    for select using (bucket_id = 'profile-pictures');
 
--- Shared photos: uploads go into "{uploader_id}/...", reads are allowed for
--- the uploader and for anyone who can view the moment the photo belongs to.
-create policy "shared_photos_insert" on storage.objects
-  for insert to authenticated
-  with check (
-    bucket_id = 'shared-photos'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-create policy "shared_photos_select" on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'shared-photos'
-    and (
-      (storage.foldername(name))[1] = auth.uid()::text
-      or exists (
-        select 1 from public.moment_photos mp
-        where mp.storage_path = name and public.can_view_moment(mp.moment_id)
+  drop policy if exists "avatars_write" on storage.objects;
+  create policy "avatars_write" on storage.objects
+    for insert to authenticated
+    with check (
+      bucket_id = 'profile-pictures'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+  drop policy if exists "avatars_update" on storage.objects;
+  create policy "avatars_update" on storage.objects
+    for update to authenticated
+    using (
+      bucket_id = 'profile-pictures'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+  -- Shared photos: uploads go into "{uploader_id}/...", reads are allowed for
+  -- the uploader and anyone who can view the moment the photo belongs to.
+  drop policy if exists "shared_photos_insert" on storage.objects;
+  create policy "shared_photos_insert" on storage.objects
+    for insert to authenticated
+    with check (
+      bucket_id = 'shared-photos'
+      and (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+  drop policy if exists "shared_photos_select" on storage.objects;
+  create policy "shared_photos_select" on storage.objects
+    for select to authenticated
+    using (
+      bucket_id = 'shared-photos'
+      and (
+        (storage.foldername(name))[1] = auth.uid()::text
+        or exists (
+          select 1 from public.moment_photos mp
+          where mp.storage_path = name and public.can_view_moment(mp.moment_id)
+        )
       )
-    )
-  );
+    );
+exception when insufficient_privilege then
+  raise notice 'Could not create storage policies (not owner of storage.objects).';
+  raise notice 'Create them manually: Dashboard -> Storage -> Policies. See supabase/README.md.';
+end $$;
 
 -- ----------------------------------------------------------------------------
--- SEED DATA — conversation starters
+-- SEED DATA — conversation starters (only inserted once)
 -- ----------------------------------------------------------------------------
 
-insert into public.starters (text, category) values
+insert into public.starters (text, category)
+select * from (values
   ('What''s the last glitch in your thinking that led to a surprisingly good idea?', 'curiosity'),
   ('What tiny detail from this week do you never want to forget?', 'memories'),
   ('What''s a memory of us that always makes you smile?', 'memories'),
@@ -455,4 +514,11 @@ insert into public.starters (text, category) values
   ('What''s the hardest thing you''re dealing with right now?', 'challenges'),
   ('What''s a fear you''d like to outgrow this year?', 'challenges'),
   ('What''s something I did that meant more to you than I probably realised?', 'appreciation'),
-  ('What''s one thing about our friendship you''re grateful for today?', 'appreciation');
+  ('What''s one thing about our friendship you''re grateful for today?', 'appreciation')
+) as seed(text, category)
+where not exists (select 1 from public.starters);
+
+-- ----------------------------------------------------------------------------
+-- VERIFY: after running, this should list ~24 policies across 8 tables.
+-- ----------------------------------------------------------------------------
+-- select tablename, policyname from pg_policies where schemaname = 'public' order by 1, 2;
